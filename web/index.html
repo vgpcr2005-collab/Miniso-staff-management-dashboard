@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#163d35" />
+  <title>MINISO | Performance Office</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/login-demo.css" />
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main id="loginScreen" class="login-screen">
+    <section class="login-aside">
+      <a class="wordmark" href="#" aria-label="MINISO home"><span class="wordmark-symbol">M</span><span>MINISO</span></a>
+      <div class="login-copy">
+        <p class="eyebrow">Retail performance office</p>
+        <h1>Good work<br />should be seen.</h1>
+        <p>One clear view of targets, sales and the people behind every result.</p>
+      </div>
+      <div class="login-foot"><span>MINISO RETAIL OPERATIONS</span><span>STAFF PERFORMANCE SYSTEM</span></div>
+    </section>
+    <section class="login-main">
+      <div class="login-card">
+        <div id="registerPanel" class="auth-panel">
+          <div class="login-heading"><span class="section-index">01 / CREATE ACCOUNT</span><h2>Join MINISO</h2><p>Create your staff account to begin tracking performance.</p></div>
+          <form id="registerForm" class="stack-form">
+            <label>Full name<input id="registerName" name="name" autocomplete="name" placeholder="Your full name" minlength="2" maxlength="100" required /></label>
+            <label>Username<input id="registerUsername" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Choose a username" minlength="3" maxlength="40" required /></label>
+            <label>Password<input id="registerPassword" name="password" type="password" autocomplete="new-password" minlength="8" placeholder="At least 8 characters" required /></label>
+            <label>Confirm password<input id="registerConfirm" name="confirmPassword" type="password" autocomplete="new-password" minlength="8" placeholder="Repeat your password" required /></label>
+            <p id="registerError" class="form-error" role="alert" hidden></p>
+            <button class="button button-dark" type="submit">Create staff account <span aria-hidden="true">→</span></button>
+          </form>
+          <p class="auth-switch">Already have an account? <button id="showLoginBtn" type="button">Sign in</button></p>
+        </div>
+
+        <div id="loginPanel" class="auth-panel" hidden>
+          <div class="login-heading"><span class="section-index">01 / SIGN IN</span><h2>Welcome back</h2><p>Sign in with your company account to continue.</p></div>
+          <form id="loginForm" class="stack-form">
+            <label>Username<input id="loginUsername" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Your username" required /></label>
+            <label>Password<input id="loginPassword" name="password" type="password" autocomplete="current-password" placeholder="Your password" required /></label>
+            <p id="loginError" class="form-error" role="alert" hidden></p>
+            <button class="button button-dark" type="submit">Sign in <span aria-hidden="true">→</span></button>
+          </form>
+          <details id="demoAccounts" class="demo-access" open><summary>Choose a demo account</summary><div class="demo-list"><p><b>Admin</b><span>admin / admin123</span><button type="button" data-demo-user="admin" data-demo-password="admin123">Use</button></p><p><b>Manager</b><span>manager / manager123</span><button type="button" data-demo-user="manager" data-demo-password="manager123">Use</button></p><p><b>Staff</b><span>harsha / staff123</span><button type="button" data-demo-user="harsha" data-demo-password="staff123">Use</button></p></div></details>
+          <p class="login-note">Demo accounts are for local project presentation only.</p>
+          <p class="auth-switch">New to MINISO? <button id="showRegisterBtn" type="button">Create an account</button></p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="application" class="app-shell" hidden>
+    <aside class="sidebar">
+      <a class="side-brand" href="#dashboard"><span class="brand-mark">M</span><span><b>MINISO</b><small>PERFORMANCE OFFICE</small></span></a>
+      <div class="side-period"><span>REPORTING PERIOD</span><select id="periodSelect" aria-label="Reporting period"></select></div>
+      <nav id="mainNav" class="nav-list" aria-label="Main navigation">
+        <a class="nav-link is-active" href="#dashboard" data-page="dashboard"><span class="nav-glyph">▦</span>Overview</a>
+        <a class="nav-link" href="#leaderboard" data-page="leaderboard"><span class="nav-glyph">↗</span>Performance</a>
+        <a class="nav-link staff-only" href="#sales-entry" data-page="sales-entry"><span class="nav-glyph">＋</span>Enter sales</a>
+        <a class="nav-link admin-only" href="#people" data-page="people"><span class="nav-glyph">♙</span>People</a>
+        <a class="nav-link admin-only" href="#incentives" data-page="incentives"><span class="nav-glyph">◇</span>Incentive rules</a>
+        <a class="nav-link manager-only" href="#reports" data-page="reports"><span class="nav-glyph">▤</span>Reports</a>
+      </nav>
+      <div class="sidebar-bottom"><span class="system-status"><i></i> Local database connected</span><div class="side-user"><span class="avatar" id="userAvatar">M</span><span class="user-copy"><b id="userName">User</b><small id="userRole">ROLE</small></span><button id="logoutBtn" class="icon-button" title="Sign out" aria-label="Sign out">↪</button></div></div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <div><p id="pageEyebrow" class="eyebrow">PERFORMANCE OFFICE / OVERVIEW</p><h1 id="pageTitle">Good morning</h1><p id="pageSubtitle" class="topbar-subtitle">A clear read on this month’s team performance.</p></div>
+        <div class="top-actions"><span id="periodPill" class="period-pill"></span><button id="refreshBtn" class="icon-button refresh-button" title="Refresh dashboard" aria-label="Refresh dashboard">⟳</button></div>
+      </header>
+
+      <section id="dashboardPage" class="page-content">
+        <div class="stat-grid">
+          <article class="stat-card"><div class="stat-label"><span>TEAM SALES</span><span class="stat-mark mark-green">₹</span></div><strong id="statSales">₹0</strong><div class="stat-foot"><span id="statSalesCaption">of target</span><span id="statSalesPct"></span></div><div class="progress-track"><i id="salesProgress"></i></div></article>
+          <article class="stat-card"><div class="stat-label"><span>TARGET ACHIEVED</span><span class="stat-mark mark-sand">%</span></div><strong id="statAchievement">0%</strong><div class="stat-foot"><span id="statTargetCaption">against assigned target</span><span id="staffCount"></span></div><div class="progress-track"><i id="achievementProgress"></i></div></article>
+          <article class="stat-card"><div class="stat-label"><span>INCENTIVES EARNED</span><span class="stat-mark mark-rose">✳</span></div><strong id="statIncentive">₹0</strong><div class="stat-foot"><span id="incentiveCaption">subject to manager approval</span><span id="qualifiedCount"></span></div></article>
+        </div>
+
+        <div class="overview-grid">
+          <section class="surface trend-surface"><div class="surface-heading"><div><p class="section-index">SALES MOMENTUM</p><h2>Six-month trend</h2></div><span class="legend"><i></i> Sales <i class="legend-target"></i> Target</span></div><div id="trendChart" class="trend-chart" role="img" aria-label="Monthly sales versus target chart"></div></section>
+          <section class="surface alerts-surface"><div class="surface-heading"><div><p class="section-index">MANAGER NOTES</p><h2>Attention list</h2></div><span id="alertCount" class="count-chip">0</span></div><div id="alertsList" class="alerts-list"></div></section>
+        </div>
+
+        <div class="lower-grid">
+          <section class="surface leaderboard-preview"><div class="surface-heading"><div><p class="section-index">TEAM RANKING</p><h2>Leading the way</h2></div><a class="text-link" href="#leaderboard" data-page-link="leaderboard">Full leaderboard →</a></div><div id="topList" class="top-list"></div></section>
+          <section class="surface incentive-summary"><div class="surface-heading"><div><p class="section-index">INCENTIVE DESK</p><h2>Approval queue</h2></div><span id="approvalQueueCount" class="count-chip">0</span></div><div id="approvalSummary" class="approval-summary"></div></section>
+        </div>
+      </section>
+
+      <section id="leaderboardPage" class="page-content" hidden>
+        <section class="surface leaderboard-surface"><div class="surface-heading"><div><p class="section-index">TARGET ACHIEVEMENT</p><h2>Performance leaderboard</h2></div><span class="muted-caption">Ranked by target achievement</span></div>
+          <div class="filter-bar"><label class="search-field"><span aria-hidden="true">⌕</span><input id="staffSearch" type="search" placeholder="Search name or staff ID" aria-label="Search staff" /></label><label class="compact-filter"><span>Department</span><select id="departmentFilter"><option value="">All departments</option></select></label><label class="compact-filter"><span>Performance</span><select id="performanceFilter"><option value="">All levels</option><option>Excellent</option><option>Good</option><option>Average</option><option>Below Target</option></select></label></div>
+          <div class="table-scroll"><table><thead><tr><th>RANK / STAFF</th><th>DEPARTMENT</th><th>TARGET</th><th>ACTUAL SALES</th><th>ACHIEVEMENT</th><th>PERFORMANCE</th><th>INCENTIVE</th><th>APPROVAL</th></tr></thead><tbody id="leaderboardBody"></tbody></table></div>
+        </section>
+      </section>
+
+      <section id="salesPage" class="page-content" hidden><div class="sales-layout"><section class="surface form-surface"><div class="surface-heading"><div><p class="section-index">SALES RECORD</p><h2>Add a transaction</h2></div></div><form id="salesForm" class="form-layout"><label>Product or category<input id="saleProduct" maxlength="80" placeholder="e.g. Travel accessories" required /></label><div class="form-row"><label>Quantity<input id="saleQuantity" type="number" min="1" step="1" value="1" required /></label><label>Sale amount<input id="saleAmount" type="number" min="0.01" step="0.01" placeholder="0.00" required /></label></div><label>Sale date<input id="saleDate" type="date" required /></label><p id="salesError" class="form-error" role="alert" hidden></p><button class="button button-dark" type="submit">Record sale <span aria-hidden="true">→</span></button></form></section><section class="surface my-performance"><div class="surface-heading"><div><p class="section-index">YOUR PERFORMANCE</p><h2>Target progress</h2></div></div><div id="myPerformance"></div></section></div></section>
+
+      <section id="peoplePage" class="page-content" hidden><div class="people-layout"><section class="surface"><div class="surface-heading"><div><p class="section-index">TEAM DIRECTORY</p><h2>Staff accounts</h2></div><span id="directoryCount" class="count-chip">0</span></div><div class="table-scroll"><table><thead><tr><th>EMPLOYEE</th><th>DEPARTMENT</th><th>USERNAME</th><th>DAILY TARGET</th><th></th></tr></thead><tbody id="staffDirectory"></tbody></table></div></section><section class="surface"><div class="surface-heading"><div><p class="section-index">NEW TEAM MEMBER</p><h2>Add staff access</h2></div></div><form id="staffForm" class="form-layout"><div class="form-row"><label>Full name<input id="newStaffName" required /></label><label>Department<input id="newStaffDepartment" required placeholder="Sales" /></label></div><div class="form-row"><label>Daily target<input id="newStaffTarget" type="number" min="1" step="0.01" required /></label><label>Username<input id="newStaffUsername" required autocomplete="off" /></label></div><div class="form-row"><label>Temporary password<input id="newStaffPassword" type="password" minlength="8" required autocomplete="new-password" /></label><label>Phone (optional)<input id="newStaffPhone" type="tel" /></label></div><div class="form-row"><label>Email (optional)<input id="newStaffEmail" type="email" /></label></div><p id="staffError" class="form-error" role="alert" hidden></p><button class="button button-dark" type="submit">Create staff account <span aria-hidden="true">→</span></button></form></section></div></section>
+
+      <section id="incentivesPage" class="page-content" hidden><section class="surface rules-surface"><div class="surface-heading"><div><p class="section-index">ADMINISTRATOR SETTINGS</p><h2>Incentive tiers</h2><p class="surface-description">The highest eligible achievement tier sets the fixed reward for a reporting period.</p></div><button id="addTierBtn" class="button button-light" type="button">＋ Add tier</button></div><form id="rulesForm"><div class="tier-head"><span>MINIMUM ACHIEVEMENT</span><span>FIXED REWARD</span><span></span></div><div id="tierRows" class="tier-rows"></div><p id="rulesError" class="form-error" role="alert" hidden></p><button class="button button-dark" type="submit">Save incentive rules <span aria-hidden="true">→</span></button></form></section></section>
+
+      <section id="reportsPage" class="page-content" hidden><section class="surface report-surface"><div class="surface-heading"><div><p class="section-index">REPORT BUILDER</p><h2>Period report</h2></div><span class="muted-caption">Monthly and quarterly summaries</span></div><form id="reportForm" class="report-filters"><label>Period<select id="reportPeriod"></select></label><label>Report type<select id="reportType"><option value="overall">Overall</option><option value="department">Department</option><option value="individual">Individual</option></select></label><label id="reportDepartmentWrap" hidden>Department<select id="reportDepartment"></select></label><label id="reportStaffWrap" hidden>Staff<select id="reportStaff"></select></label><button class="button button-dark" type="submit">Generate report <span aria-hidden="true">→</span></button></form><p id="reportError" class="form-error" role="alert" hidden></p><div id="reportResult" class="report-result" hidden><div class="report-actions"><div><p class="section-index">PERFORMANCE SUMMARY</p><h3 id="reportTitle"></h3></div><div class="button-group"><button id="exportCsvBtn" class="button button-light" type="button">Export CSV</button><button id="exportPdfBtn" class="button button-light" type="button">Print / PDF</button></div></div><div id="reportStats" class="report-statline"></div><div class="table-scroll"><table><thead><tr><th>STAFF</th><th>DEPARTMENT</th><th>TARGET</th><th>SALES</th><th>ACHIEVEMENT</th><th>LEVEL</th><th>INCENTIVE</th></tr></thead><tbody id="reportBody"></tbody></table></div></div></section></section>
+
+      <footer class="page-footer"><span>MINISO PERFORMANCE OFFICE</span><span>LOCAL DATABASE · ROLE-BASED ACCESS</span></footer>
+    </main>
+  </div>
+
+  <dialog id="profileDialog" class="profile-dialog"><button id="closeProfile" class="icon-button dialog-close" aria-label="Close profile">×</button><div id="profileContent"></div></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

@@ -1,0 +1,4 @@
+P001,Water Bottle,Lifestyle,299.0,120,Active
+P002,Toy Set,Kids,499.0,80,Active
+P003,Travel Bag,Accessories,850.0,40,Active
+P004,Beauty Kit,Beauty,1200.0,35,Active
