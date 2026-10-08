@@ -154,6 +154,33 @@ class DashboardServerTests(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertIn("Attendance", payload["error"])
 
+    def test_state_endpoint_normalizes_double_encoded_state_and_rejects_corrupt_state(self):
+        self.register(self.client, "state_format_user")
+        with server.database() as connection:
+            row = connection.execute(
+                "SELECT state_json FROM users WHERE username = ?",
+                ("state_format_user",),
+            ).fetchone()
+            connection.execute(
+                "UPDATE users SET state_json = ? WHERE username = ?",
+                (json.dumps(row["state_json"]), "state_format_user"),
+            )
+
+        status, state, _ = self.request("/api/state")
+        self.assertEqual(status, 200)
+        self.assertIsInstance(state, dict)
+        self.assertEqual(state["attendance"], [])
+
+        with server.database() as connection:
+            connection.execute(
+                "UPDATE users SET state_json = ? WHERE username = ?",
+                ("[]", "state_format_user"),
+            )
+        status, payload, headers = self.request("/api/state")
+        self.assertEqual(status, 500)
+        self.assertEqual(headers.get_content_type(), "application/json")
+        self.assertIn("Saved dashboard data", payload["error"])
+
 
 if __name__ == "__main__":
     unittest.main()

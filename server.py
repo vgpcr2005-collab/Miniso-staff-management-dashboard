@@ -266,7 +266,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if user:
                 with database() as connection:
                     row = connection.execute("SELECT state_json FROM users WHERE id = ?", (user["id"],)).fetchone()
-                self.send_json(200, json.loads(row["state_json"]))
+                try:
+                    saved_state = json.loads(row["state_json"])
+                    if isinstance(saved_state, str):
+                        saved_state = json.loads(saved_state)
+                    state = validate_state(saved_state)
+                except (ValueError, json.JSONDecodeError):
+                    print(f"Invalid saved dashboard state for user {user['id']}.")
+                    self.send_json(500, {"error": "Saved dashboard data is invalid and could not be loaded."})
+                    return
+                self.send_json(200, state)
         elif path.startswith("/api/"):
             self.send_json(404, {"error": "API endpoint not found."})
         else:

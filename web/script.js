@@ -231,6 +231,7 @@ async function apiRequest(path, options = {}) {
   let payload = null;
   try {
     payload = responseText ? JSON.parse(responseText) : null;
+    if (typeof payload === 'string') payload = JSON.parse(payload);
   } catch {
     payload = null;
   }
@@ -242,7 +243,8 @@ async function apiRequest(path, options = {}) {
     throw new Error(`The server returned HTTP ${response.status} without a valid JSON error response.`);
   }
   if (!payload || typeof payload !== 'object') {
-    throw new Error(`The server returned an invalid response (HTTP ${response.status}).`);
+    const contentType = response.headers.get('content-type') || 'missing Content-Type';
+    throw new Error(`The API endpoint ${path} returned an invalid response (HTTP ${response.status}, ${contentType}). Check that the dashboard frontend and server are from the same version.`);
   }
   return payload;
 }
