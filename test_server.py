@@ -54,6 +54,7 @@ class DashboardServerTests(unittest.TestCase):
     def test_registration_login_and_dashboard_data_are_server_persisted_and_isolated(self):
         status, registered, headers = self.register(self.client, "first_user")
         self.assertEqual(status, 201)
+        self.assertEqual(headers.get_content_type(), "application/json")
         self.assertEqual(registered["user"]["username"], "first_user")
         self.assertIn("HttpOnly", headers["Set-Cookie"])
         self.assertIn("SameSite=Lax", headers["Set-Cookie"])
