@@ -630,6 +630,14 @@ td { color: #453542; }
   font-weight: 700;
 }
 
+.save-status {
+  align-self: center;
+  color: #75465f;
+  font-size: 0.76rem;
+}
+
+.save-status[data-status="error"] { color: #b91c1c; }
+
 @media (max-width: 760px) {
   .auth-screen {
     grid-template-columns: 1fr;

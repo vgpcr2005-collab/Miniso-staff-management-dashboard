@@ -1,6 +1,13 @@
 services:
   - type: web
     name: miniso-staff-performance-dashboard
-    runtime: static
+    runtime: python
     buildCommand: ""
-    staticPublishPath: web
+    startCommand: python server.py
+    disk:
+      name: miniso-dashboard-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: DATABASE_PATH
+        value: /var/data/miniso-dashboard.sqlite3

@@ -46,7 +46,7 @@
           <form id="registerForm" class="auth-form" hidden>
             <p class="auth-kicker">GET STARTED</p>
             <h2>Create account</h2>
-            <p class="auth-description">Register your username and password for this browser.</p>
+            <p class="auth-description">Create an account to access your team's dashboard.</p>
             <label>
               Full name
               <input id="registerName" type="text" autocomplete="name" minlength="2" maxlength="80" required />
@@ -67,7 +67,7 @@
             <button class="primary-btn auth-submit" type="submit">Create account <span aria-hidden="true">→</span></button>
             <p class="auth-switch">Already registered? <button id="showLoginBtn" type="button">Sign in</button></p>
           </form>
-          <p class="auth-demo-note">Local demo: accounts are saved in this browser and are not shared across devices.</p>
+          <p class="auth-demo-note">Your account and dashboard data are securely stored on the server.</p>
         </div>
       </section>
     </main>
@@ -110,6 +110,7 @@
               Reporting month
               <input type="month" id="reportMonth" />
             </label>
+            <span id="saveStatus" class="save-status" role="status" aria-live="polite"></span>
             <span id="signedInUser" class="signed-in-user"></span>
             <button id="logoutBtn" class="secondary-btn" type="button">Sign out</button>
             <button id="resetDataBtn" class="secondary-btn" type="button">Reset Demo Data</button>

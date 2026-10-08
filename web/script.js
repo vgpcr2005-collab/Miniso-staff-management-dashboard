@@ -1,7 +1,3 @@
-const STORAGE_KEY = 'miniso-performance-dashboard';
-const ACCOUNTS_KEY = 'miniso-dashboard-accounts';
-const SESSION_KEY = 'miniso-dashboard-session';
-const PASSWORD_HASH_ITERATIONS = 120000;
 const currencyFormatter = new Intl.NumberFormat('en-IN', {
   style: 'currency',
   currency: 'INR',
@@ -52,23 +48,6 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function loadState() {
-  const serialized = localStorage.getItem(STORAGE_KEY);
-  if (!serialized) return createInitialState();
-
-  try {
-    const saved = JSON.parse(serialized);
-    if (Array.isArray(saved.staff) && Array.isArray(saved.sales)) {
-      return migrateState(saved);
-    }
-    throw new Error('Saved dashboard data has an unsupported format.');
-  } catch (error) {
-    console.error('Could not load saved dashboard data.', error);
-    window.alert('Saved dashboard data could not be read. Demo data has been loaded instead.');
-    return createInitialState();
-  }
-}
-
 function migrateState(saved) {
   const month = currentMonth();
   const daysInMonth = new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0).getDate();
@@ -117,7 +96,9 @@ function migrateState(saved) {
   };
 }
 
-let state = loadState();
+let state = createInitialState();
+let saveQueue = Promise.resolve();
+let pendingSaveCount = 0;
 
 const $ = (id) => document.getElementById(id);
 const staffForm = $('staffForm');
@@ -151,10 +132,14 @@ function initialize() {
   $('showRegisterBtn').addEventListener('click', showRegistrationForm);
   $('showLoginBtn').addEventListener('click', showLoginForm);
   $('logoutBtn').addEventListener('click', handleLogout);
+  window.addEventListener('beforeunload', (event) => {
+    if (pendingSaveCount > 0) {
+      event.preventDefault();
+      event.returnValue = '';
+    }
+  });
 
   populateRuleFields();
-  renderStaffOptions();
-  renderDashboard();
   restoreSession();
 }
 
@@ -174,30 +159,29 @@ function showLoginForm() {
   $('loginUsername').focus();
 }
 
-function readAccounts() {
-  const serialized = localStorage.getItem(ACCOUNTS_KEY);
-  if (!serialized) return [];
-  const accounts = JSON.parse(serialized);
-  if (!Array.isArray(accounts) || accounts.some((account) =>
-    typeof account.username !== 'string'
-    || typeof account.name !== 'string'
-    || typeof account.salt !== 'string'
-    || typeof account.passwordHash !== 'string'
-  )) {
-    throw new Error('Saved account data is invalid. Clear this browser’s account storage and register again.');
-  }
-  return accounts;
+async function apiRequest(path, options = {}) {
+  const headers = new Headers(options.headers || {});
+  if (options.body) headers.set('Content-Type', 'application/json');
+  const response = await fetch(path, { ...options, headers, credentials: 'same-origin', cache: 'no-store' });
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.error || 'The server could not complete this request.');
+  return payload;
 }
 
-function restoreSession() {
+async function loadDashboard(account) {
+  state = migrateState(await apiRequest('/api/state'));
+  populateRuleFields();
+  renderStaffOptions();
+  setSaveStatus('All changes saved', 'saved');
+  openDashboard(account);
+}
+
+async function restoreSession() {
   try {
-    const username = sessionStorage.getItem(SESSION_KEY);
-    if (!username) return;
-    const account = readAccounts().find((item) => item.username === username);
-    if (account) openDashboard(account);
-    else sessionStorage.removeItem(SESSION_KEY);
+    const session = await apiRequest('/api/session');
+    if (session.authenticated) await loadDashboard(session.user);
   } catch (error) {
-    showAuthError('loginError', error.message);
+    showAuthError('loginError', error.message || 'Unable to connect to the dashboard server.');
   }
 }
 
@@ -227,25 +211,18 @@ async function handleRegistration(event) {
   }
 
   try {
-    const accounts = readAccounts();
-    if (accounts.some((account) => account.username === username)) {
-      showAuthError('registerError', 'That username is already registered in this browser.');
-      return;
-    }
-    const salt = crypto.getRandomValues(new Uint8Array(16));
-    const passwordHash = await hashPassword(password, salt);
-    accounts.push({
-      name,
-      username,
-      salt: bytesToHex(salt),
-      passwordHash
+    const response = await apiRequest('/api/register', {
+      method: 'POST',
+      body: JSON.stringify({
+        name,
+        username,
+        password
+      })
     });
-    localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accounts));
-    sessionStorage.setItem(SESSION_KEY, username);
+    await loadDashboard(response.user);
     $('registerForm').reset();
-    openDashboard({ name, username });
   } catch (failure) {
-    showAuthError('registerError', failure.message || 'Unable to create the account in this browser.');
+    showAuthError('registerError', failure.message || 'Unable to create the account.');
   }
 }
 
@@ -256,52 +233,15 @@ async function handleLogin(event) {
   $('loginError').hidden = true;
 
   try {
-    const account = readAccounts().find((item) => item.username === username);
-    if (!account) {
-      showAuthError('loginError', 'Username or password is incorrect.');
-      return;
-    }
-    const candidate = await hashPassword(password, hexToBytes(account.salt));
-    if (!constantTimeEqual(candidate, account.passwordHash)) {
-      showAuthError('loginError', 'Username or password is incorrect.');
-      return;
-    }
-    sessionStorage.setItem(SESSION_KEY, username);
+    const response = await apiRequest('/api/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password })
+    });
+    await loadDashboard(response.user);
     $('loginForm').reset();
-    openDashboard(account);
   } catch (failure) {
-    showAuthError('loginError', failure.message || 'Unable to sign in with browser storage.');
+    showAuthError('loginError', failure.message || 'Unable to sign in.');
   }
-}
-
-async function hashPassword(password, salt) {
-  if (!crypto.subtle) throw new Error('Secure password hashing is unavailable in this browser. Open this dashboard in a modern browser.');
-  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits({
-    name: 'PBKDF2',
-    salt,
-    iterations: PASSWORD_HASH_ITERATIONS,
-    hash: 'SHA-256'
-  }, key, 256);
-  return bytesToHex(new Uint8Array(bits));
-}
-
-function bytesToHex(bytes) {
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-}
-
-function hexToBytes(hex) {
-  if (!/^(?:[0-9a-f]{2})+$/i.test(hex)) throw new Error('Saved account security data is invalid.');
-  return new Uint8Array(hex.match(/.{2}/g).map((byte) => Number.parseInt(byte, 16)));
-}
-
-function constantTimeEqual(left, right) {
-  if (left.length !== right.length) return false;
-  let difference = 0;
-  for (let index = 0; index < left.length; index += 1) {
-    difference |= left.charCodeAt(index) ^ right.charCodeAt(index);
-  }
-  return difference === 0;
 }
 
 function openDashboard(account) {
@@ -311,8 +251,13 @@ function openDashboard(account) {
   renderDashboard();
 }
 
-function handleLogout() {
-  sessionStorage.removeItem(SESSION_KEY);
+async function handleLogout() {
+  try {
+    await apiRequest('/api/logout', { method: 'POST', body: '{}' });
+  } catch (error) {
+    window.alert(error.message || 'Unable to sign out.');
+    return;
+  }
   $('dashboardApp').hidden = true;
   $('authScreen').hidden = false;
   $('loginForm').reset();
@@ -325,7 +270,7 @@ function showAuthError(id, message) {
   element.hidden = false;
 }
 
-function handleStaffSubmit(event) {
+async function handleStaffSubmit(event) {
   event.preventDefault();
   const name = $('staffName').value.trim();
   const department = $('department').value.trim();
@@ -340,17 +285,18 @@ function handleStaffSubmit(event) {
     return;
   }
 
+  const previousState = clone(state);
   const id = generateStaffId();
   state.staff.push({ id, name, department, status, defaultTarget: target });
   upsertTarget(id, reportMonthInput.value, target);
-  persistState();
+  if (!await persistState(previousState)) return;
   staffForm.reset();
   $('staffStatus').value = 'Active';
   renderStaffOptions();
   renderDashboard();
 }
 
-function handleTargetSubmit(event) {
+async function handleTargetSubmit(event) {
   event.preventDefault();
   const staffId = $('targetStaffId').value;
   const month = $('targetMonth').value;
@@ -360,16 +306,17 @@ function handleTargetSubmit(event) {
     return;
   }
 
+  const previousState = clone(state);
   upsertTarget(staffId, month, amount);
   const person = state.staff.find((item) => item.id === staffId);
   if (person && month === reportMonthInput.value) person.defaultTarget = amount;
-  persistState();
+  if (!await persistState(previousState)) return;
   targetForm.reset();
   $('targetMonth').value = reportMonthInput.value;
   renderDashboard();
 }
 
-function handleSalesSubmit(event) {
+async function handleSalesSubmit(event) {
   event.preventDefault();
   const staffId = $('salesStaffId').value;
   const date = $('saleDate').value;
@@ -389,6 +336,7 @@ function handleSalesSubmit(event) {
     return;
   }
 
+  const previousState = clone(state);
   state.sales.push({
     id: generateSaleId(),
     staffId,
@@ -398,7 +346,7 @@ function handleSalesSubmit(event) {
     amount,
     paymentStatus: $('paymentStatus').value
   });
-  persistState();
+  if (!await persistState(previousState)) return;
   salesForm.reset();
   $('saleDate').value = localDateString();
   $('quantity').value = '1';
@@ -407,7 +355,7 @@ function handleSalesSubmit(event) {
   renderDashboard();
 }
 
-function handleRulesSubmit(event) {
+async function handleRulesSubmit(event) {
   event.preventDefault();
   const rules = [];
   for (let index = 1; index <= 4; index += 1) {
@@ -423,8 +371,9 @@ function handleRulesSubmit(event) {
     window.alert('Enter non-negative rewards and strictly increasing achievement thresholds.');
     return;
   }
+  const previousState = clone(state);
   state.rules = rules;
-  persistState();
+  if (!await persistState(previousState)) return;
   renderDashboard();
 }
 
@@ -842,8 +791,50 @@ function updateCurrentDateTime() {
   $('currentDateTime').textContent = new Date().toLocaleString('en-IN', { dateStyle: 'full', timeStyle: 'medium' });
 }
 
-function persistState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+async function persistState(previousState) {
+  const snapshot = clone(state);
+  pendingSaveCount += 1;
+  setDashboardFormsDisabled(true);
+  setSaveStatus('Saving changes…', 'saving');
+  const request = saveQueue.then(() => apiRequest('/api/state', {
+    method: 'PUT',
+    body: JSON.stringify(snapshot)
+  }));
+  saveQueue = request.catch(() => {});
+
+  try {
+    await request;
+    return true;
+  } catch (error) {
+    state = previousState;
+    populateRuleFields();
+    renderStaffOptions();
+    renderDashboard();
+    setSaveStatus(`Save failed: ${error.message}`, 'error');
+    window.alert(`Dashboard changes could not be saved: ${error.message}`);
+    return false;
+  } finally {
+    pendingSaveCount -= 1;
+    setDashboardFormsDisabled(pendingSaveCount > 0);
+    if (pendingSaveCount > 0) setSaveStatus('Saving changes…', 'saving');
+    else if ($('saveStatus').dataset.status !== 'error') setSaveStatus('All changes saved', 'saved');
+  }
+}
+
+function setDashboardFormsDisabled(disabled) {
+  [staffForm, targetForm, salesForm, rulesForm].forEach((form) => {
+    Array.from(form.elements).forEach((element) => {
+      element.disabled = disabled;
+    });
+  });
+  $('logoutBtn').disabled = disabled;
+  $('resetDataBtn').disabled = disabled;
+}
+
+function setSaveStatus(message, status) {
+  const element = $('saveStatus');
+  element.textContent = message;
+  element.dataset.status = status;
 }
 
 function exportMonthlyCsv() {
@@ -870,10 +861,11 @@ function escapeCsv(value) {
   return `"${text.replaceAll('"', '""')}"`;
 }
 
-function resetData() {
+async function resetData() {
   if (!window.confirm('Reset all saved dashboard data to the demo data?')) return;
+  const previousState = clone(state);
   state = createInitialState();
-  persistState();
+  if (!await persistState(previousState)) return;
   populateRuleFields();
   $('targetMonth').value = currentMonth();
   renderStaffOptions();

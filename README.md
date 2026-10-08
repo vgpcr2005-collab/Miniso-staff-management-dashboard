@@ -1,20 +1,29 @@
 # MINISO Staff Performance Dashboard
 
-This project contains one app: the pink MINISO staff dashboard in `web/`.
-It is a browser-only demo. Accounts and dashboard data are stored in the
-current browser and are not shared across devices or backed up on a server.
+This full-stack app combines the MINISO staff dashboard in `web/` with a
+Python HTTP API and SQLite database. Accounts, sales, targets, staff, and
+incentive rules are stored on the server and are separated by account.
+Passwords are hashed on the server, and signed-in sessions use an HttpOnly
+cookie.
 
 ## Run locally
 
-On Windows, double-click `run.bat`, then open <http://localhost:8000>.
-Python 3 is needed only to serve the static files locally.
+Install Python 3.10 or newer, then double-click `run.bat` and open
+<http://localhost:8000>. The server uses only Python's standard library, so
+there are no package installation steps. It creates
+`data/miniso-dashboard.sqlite3` automatically; the database is excluded from
+Git. Stop the server with Ctrl+C in its console.
 
 ## Deploy to Render
 
-The root `render.yaml` configures the project as a static site that publishes
-`web/`. In Render, create or update a Blueprint from this repository and sync
-the Blueprint. If the existing Python web service cannot change to a static
-site, create the static site from the Blueprint and use its URL.
+The root `render.yaml` configures a Python web service and a persistent disk
+mounted at `/var/data`. In Render, create or update a Blueprint from this
+repository and sync the Blueprint. Persistent disks require a paid Render
+service. The database file is stored at `/var/data/miniso-dashboard.sqlite3`
+so it survives service restarts and deploys.
 
-Register an account from the sign-in page. The dashboard's Reset Demo Data
-button restores sample data in the current browser.
+Register an account from the sign-in page. Each new account starts with sample
+dashboard data; the Reset Demo Data button restores those defaults for the
+currently signed-in account. Accounts and records from the old browser-only
+demo are not automatically imported; create a server account and re-enter any
+data that needs to be kept.
