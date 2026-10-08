@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import tempfile
 import threading
 import unittest
@@ -120,9 +121,172 @@ class DashboardServerTests(unittest.TestCase):
         self.assertEqual(status, 409)
         self.assertIn("already registered", payload["error"])
 
+    def test_company_invitations_share_records_and_enforce_roles(self):
+        status, owner, _ = self.register(self.client, "company_owner")
+        self.assertEqual(status, 201)
+        self.assertEqual(owner["user"]["role"], "admin")
+
+        status, invitation, _ = self.request(
+            "/api/company/invitations",
+            "POST",
+            {"role": "manager"},
+        )
+        self.assertEqual(status, 201)
+        token = invitation["invitation"]["token"]
+
+        manager_client = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(CookieJar()))
+        status, manager, _ = self.request(
+            "/api/register",
+            "POST",
+            {
+                "name": "Company Manager",
+                "username": "company_manager",
+                "password": "correct horse battery",
+                "inviteToken": token,
+            },
+            manager_client,
+        )
+        self.assertEqual(status, 201)
+        self.assertEqual(manager["user"]["role"], "manager")
+        self.assertEqual(manager["user"]["companyName"], owner["user"]["companyName"])
+        self.assertEqual(
+            self.request(
+                "/api/company/invitations",
+                "POST",
+                {"role": "manager"},
+                manager_client,
+            )[0],
+            403,
+        )
+        _, members, _ = self.request("/api/company/members", client=manager_client)
+        self.assertEqual(sorted(member["role"] for member in members["members"]), ["admin", "manager"])
+
+        status, created_staff, _ = self.request(
+            "/api/staff",
+            "POST",
+            {"name": "New Employee", "department": "Sales", "defaultTarget": 1000},
+            manager_client,
+        )
+        self.assertEqual(status, 201)
+        self.assertEqual(created_staff["staff"]["id"], "S004")
+        _, shared_staff, _ = self.request("/api/staff")
+        self.assertEqual(shared_staff["staff"][-1]["name"], "New Employee")
+
+        staff_invitation_status, staff_invitation, _ = self.request(
+            "/api/company/invitations",
+            "POST",
+            {"role": "staff"},
+            manager_client,
+        )
+        self.assertEqual(staff_invitation_status, 201)
+        staff_client = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(CookieJar()))
+        status, staff_user, _ = self.request(
+            "/api/register",
+            "POST",
+            {
+                "name": "Read Only Employee",
+                "username": "readonly_employee",
+                "password": "correct horse battery",
+                "inviteToken": staff_invitation["invitation"]["token"],
+            },
+            staff_client,
+        )
+        self.assertEqual(status, 201)
+        self.assertEqual(staff_user["user"]["role"], "staff")
+        status, initial, _ = self.request("/api/state", client=staff_client)
+        self.assertEqual(status, 200)
+        self.assertEqual(self.request("/api/state", "PUT", initial, staff_client)[0], 403)
+        self.assertEqual(
+            self.request(
+                "/api/staff",
+                "POST",
+                {"name": "Blocked Employee", "department": "Sales", "defaultTarget": 0},
+                staff_client,
+            )[0],
+            403,
+        )
+        report_month = initial["targets"][0]["month"]
+        status, report, _ = self.request(f"/api/reports/monthly?month={report_month}", client=staff_client)
+        self.assertEqual(status, 200)
+        self.assertGreater(report["totalSales"], 0)
+
+        other_client = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(CookieJar()))
+        self.assertEqual(self.register(other_client, "private_company")[0], 201)
+        _, isolated_staff, _ = self.request("/api/staff", client=other_client)
+        self.assertEqual(len(isolated_staff["staff"]), 3)
+
+        self.assertEqual(
+            self.request(
+                "/api/register",
+                "POST",
+                {
+                    "name": "Duplicate Invitation",
+                    "username": "duplicate_invite",
+                    "password": "correct horse battery",
+                    "inviteToken": token,
+                },
+                urllib.request.build_opener(urllib.request.HTTPCookieProcessor(CookieJar())),
+            )[0],
+            400,
+        )
+
+    def test_staff_and_sales_crud_and_monthly_report(self):
+        self.register(self.client, "crud_manager")
+        status, staff, _ = self.request(
+            "/api/staff",
+            "POST",
+            {"name": "CRUD Employee", "department": "Sales", "defaultTarget": 1000},
+        )
+        self.assertEqual(status, 201)
+        staff_id = staff["staff"]["id"]
+        self.assertEqual(
+            self.request(
+                f"/api/staff/{staff_id}",
+                "PUT",
+                {"name": "Updated Employee", "department": "Retail", "status": "Active", "defaultTarget": 2000},
+            )[0],
+            200,
+        )
+        month = self.request("/api/state")[1]["targets"][0]["month"]
+        status, sale, _ = self.request(
+            "/api/sales",
+            "POST",
+            {
+                "staffId": staff_id,
+                "date": f"{month}-02",
+                "product": "Test Product",
+                "quantity": 2,
+                "amount": 1500,
+                "paymentStatus": "Completed",
+            },
+        )
+        self.assertEqual(status, 201)
+        sale_id = sale["sale"]["id"]
+        status, report, _ = self.request(f"/api/reports/monthly?month={month}")
+        self.assertEqual(status, 200)
+        self.assertEqual(report["totalSales"], 256500)
+        self.assertEqual(report["unitsSold"], 9)
+        self.assertEqual(
+            self.request(
+                f"/api/sales/{sale_id}",
+                "PUT",
+                {"amount": 2000, "paymentStatus": "Pending"},
+            )[0],
+            200,
+        )
+        status, report, _ = self.request(f"/api/reports/monthly?month={month}")
+        self.assertEqual(status, 200)
+        self.assertEqual(report["totalSales"], 255000)
+        self.assertEqual(self.request(f"/api/staff/{staff_id}", "DELETE")[0], 409)
+        self.assertEqual(self.request(f"/api/sales/{sale_id}", "DELETE")[0], 200)
+        self.assertEqual(self.request(f"/api/staff/{staff_id}", "DELETE")[0], 200)
+        self.assertEqual(self.request("/api/reports/monthly?month=2026-13")[0], 400)
+
     def test_static_dashboard_is_served_by_backend(self):
         response = self.client.open(self.base_url + "/")
         self.assertEqual(response.status, 200)
+        self.assertEqual(response.headers.get_content_type(), "text/html")
+        self.assertEqual(response.headers.get("Cache-Control"), "no-store")
         self.assertIn("MINISO Staff Performance Dashboard", response.read().decode())
 
     def test_unknown_api_route_returns_json_error(self):
@@ -159,11 +323,11 @@ class DashboardServerTests(unittest.TestCase):
         self.register(self.client, "state_format_user")
         with server.database() as connection:
             row = connection.execute(
-                "SELECT state_json FROM users WHERE username = ?",
+                "SELECT companies.state_json FROM users JOIN companies ON companies.id = users.company_id WHERE username = ?",
                 ("state_format_user",),
             ).fetchone()
             connection.execute(
-                "UPDATE users SET state_json = ? WHERE username = ?",
+                "UPDATE companies SET state_json = ? WHERE id = (SELECT company_id FROM users WHERE username = ?)",
                 (json.dumps(row["state_json"]), "state_format_user"),
             )
 
@@ -174,13 +338,53 @@ class DashboardServerTests(unittest.TestCase):
 
         with server.database() as connection:
             connection.execute(
-                "UPDATE users SET state_json = ? WHERE username = ?",
+                "UPDATE companies SET state_json = ? WHERE id = (SELECT company_id FROM users WHERE username = ?)",
                 ("[]", "state_format_user"),
             )
         status, payload, headers = self.request("/api/state")
         self.assertEqual(status, 500)
         self.assertEqual(headers.get_content_type(), "application/json")
         self.assertIn("Saved dashboard data", payload["error"])
+
+    def test_existing_user_data_migrates_to_a_private_admin_company(self):
+        legacy_database = Path(self.temp_directory.name) / "legacy.sqlite3"
+        legacy_state = json.dumps(server.initial_state(), separators=(",", ":"))
+        connection = sqlite3.connect(legacy_database)
+        try:
+            connection.execute(
+                """
+                CREATE TABLE users (
+                    id INTEGER PRIMARY KEY,
+                    username TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL,
+                    salt BLOB NOT NULL,
+                    password_hash BLOB NOT NULL,
+                    state_json TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                "INSERT INTO users (username, name, salt, password_hash, state_json) VALUES (?, ?, ?, ?, ?)",
+                ("legacy_admin", "Legacy Admin", b"salt", b"hash", legacy_state),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        server.DATABASE_PATH = legacy_database
+        server.initialize_database()
+        with server.database() as connection:
+            user = connection.execute(
+                """
+                SELECT users.role, companies.name AS company_name, companies.state_json
+                FROM users JOIN companies ON companies.id = users.company_id
+                WHERE users.username = ?
+                """,
+                ("legacy_admin",),
+            ).fetchone()
+        self.assertEqual(user["role"], "admin")
+        self.assertEqual(user["company_name"], "Legacy Admin's company")
+        self.assertEqual(json.loads(user["state_json"]), json.loads(legacy_state))
 
 
 if __name__ == "__main__":

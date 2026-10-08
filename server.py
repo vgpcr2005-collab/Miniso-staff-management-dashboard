@@ -14,7 +14,7 @@ from datetime import datetime
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 
 ROOT = Path(__file__).resolve().parent
@@ -57,6 +57,13 @@ def initialize_database():
                 name TEXT NOT NULL,
                 salt BLOB NOT NULL,
                 password_hash BLOB NOT NULL,
+                state_json TEXT NOT NULL,
+                company_id INTEGER REFERENCES companies(id),
+                role TEXT NOT NULL DEFAULT 'admin'
+            );
+            CREATE TABLE IF NOT EXISTS companies (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
                 state_json TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS sessions (
@@ -65,8 +72,35 @@ def initialize_database():
                 expires_at INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at);
+            CREATE TABLE IF NOT EXISTS invitations (
+                token_hash TEXT PRIMARY KEY,
+                company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                role TEXT NOT NULL CHECK (role IN ('manager', 'staff')),
+                created_by INTEGER NOT NULL REFERENCES users(id),
+                created_at INTEGER NOT NULL,
+                expires_at INTEGER NOT NULL,
+                used_at INTEGER
+            );
             """
         )
+        user_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(users)")
+        }
+        if "company_id" not in user_columns:
+            connection.execute("ALTER TABLE users ADD COLUMN company_id INTEGER REFERENCES companies(id)")
+        if "role" not in user_columns:
+            connection.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'")
+        for user in connection.execute(
+            "SELECT id, name, state_json FROM users WHERE company_id IS NULL"
+        ).fetchall():
+            cursor = connection.execute(
+                "INSERT INTO companies (name, state_json) VALUES (?, ?)",
+                (f"{user['name']}'s company", user["state_json"]),
+            )
+            connection.execute(
+                "UPDATE users SET company_id = ? WHERE id = ?",
+                (cursor.lastrowid, user["id"]),
+            )
 
 
 def initial_state():
@@ -257,25 +291,61 @@ class DashboardHandler(BaseHTTPRequestHandler):
     server_version = "MINISO-Dashboard"
 
     def do_GET(self):
-        path = urlsplit(self.path).path
+        parsed_path = urlsplit(self.path)
+        path = parsed_path.path
         if path == "/api/session":
             user = self.current_user()
             self.send_json(200, {"authenticated": user is not None, "user": self.public_user(user) if user else None})
         elif path == "/api/state":
             user = self.require_user()
             if user:
-                with database() as connection:
-                    row = connection.execute("SELECT state_json FROM users WHERE id = ?", (user["id"],)).fetchone()
+                state = self.load_company_state(user)
+                if state is not None:
+                    self.send_json(200, state)
+        elif path in ("/api/staff", "/api/sales"):
+            user = self.require_user()
+            if user:
+                state = self.load_company_state(user)
+                if state is not None:
+                    key = path.rsplit("/", 1)[-1]
+                    self.send_json(200, {key: state[key]})
+        elif path == "/api/reports/monthly":
+            user = self.require_user()
+            if user:
+                month = parse_qs(parsed_path.query).get("month", [datetime.now().strftime("%Y-%m")])[0]
                 try:
-                    saved_state = json.loads(row["state_json"])
-                    if isinstance(saved_state, str):
-                        saved_state = json.loads(saved_state)
-                    state = validate_state(saved_state)
-                except (ValueError, json.JSONDecodeError):
-                    print(f"Invalid saved dashboard state for user {user['id']}.")
-                    self.send_json(500, {"error": "Saved dashboard data is invalid and could not be loaded."})
+                    state = self.load_company_state(user)
+                    if state is None:
+                        return
+                    report = self.monthly_report(state, month)
+                except ValueError as error:
+                    self.send_json(400, {"error": str(error)})
                     return
-                self.send_json(200, state)
+                if report is not None:
+                    self.send_json(200, report)
+        elif path == "/api/company/members":
+            user = self.require_role(("admin", "manager"))
+            if user:
+                with database() as connection:
+                    members = connection.execute(
+                        "SELECT username, name, role FROM users WHERE company_id = ? ORDER BY name COLLATE NOCASE",
+                        (user["company_id"],),
+                    ).fetchall()
+                self.send_json(200, {"members": [dict(member) for member in members]})
+        elif path == "/api/company/invitations":
+            user = self.require_role(("admin", "manager"))
+            if user:
+                with database() as connection:
+                    invitations = connection.execute(
+                        """
+                        SELECT role, created_at, expires_at, used_at
+                        FROM invitations
+                        WHERE company_id = ? AND expires_at > ? AND used_at IS NULL
+                        ORDER BY created_at DESC
+                        """,
+                        (user["company_id"], int(time.time())),
+                    ).fetchall()
+                self.send_json(200, {"invitations": [dict(invitation) for invitation in invitations]})
         elif path.startswith("/api/"):
             self.send_json(404, {"error": "API endpoint not found."})
         else:
@@ -293,6 +363,18 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self.login(body)
             elif path == "/api/logout":
                 self.logout()
+            elif path == "/api/company/invitations":
+                user = self.require_role(("admin", "manager"))
+                if user:
+                    self.create_invitation(user, body)
+            elif path == "/api/staff":
+                user = self.require_role(("admin", "manager"))
+                if user:
+                    self.create_staff(user, body)
+            elif path == "/api/sales":
+                user = self.require_role(("admin", "manager"))
+                if user:
+                    self.create_sale(user, body)
             else:
                 self.send_json(404, {"error": "API endpoint not found."})
         except ValueError as error:
@@ -304,20 +386,39 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.send_json(500, {"error": "The server could not complete this request."})
 
     def do_PUT(self):
-        if urlsplit(self.path).path != "/api/state":
+        path = urlsplit(self.path).path
+        if path.startswith("/api/staff/") or path.startswith("/api/sales/"):
+            if not self.check_origin():
+                return
+            user = self.require_role(("admin", "manager"))
+            if not user:
+                return
+            try:
+                item_id = unquote(path.rsplit("/", 1)[-1])
+                if path.startswith("/api/staff/"):
+                    self.update_staff(user, item_id, self.read_json())
+                else:
+                    self.update_sale(user, item_id, self.read_json())
+            except ValueError as error:
+                self.send_json(400, {"error": str(error)})
+            except Exception:
+                traceback.print_exc()
+                self.send_json(500, {"error": "The server could not update this record."})
+            return
+        if path != "/api/state":
             self.send_json(404, {"error": "API endpoint not found."})
             return
         if not self.check_origin():
             return
-        user = self.require_user()
+        user = self.require_role(("admin", "manager"))
         if not user:
             return
         try:
             state = validate_state(self.read_json())
             with database() as connection:
                 connection.execute(
-                    "UPDATE users SET state_json = ? WHERE id = ?",
-                    (json.dumps(state, separators=(",", ":")), user["id"]),
+                    "UPDATE companies SET state_json = ? WHERE id = ?",
+                    (json.dumps(state, separators=(",", ":")), user["company_id"]),
                 )
             self.send_json(200, {"saved": True})
         except ValueError as error:
@@ -325,6 +426,28 @@ class DashboardHandler(BaseHTTPRequestHandler):
         except Exception:
             traceback.print_exc()
             self.send_json(500, {"error": "The server could not save dashboard data."})
+
+    def do_DELETE(self):
+        path = urlsplit(self.path).path
+        if not (path.startswith("/api/staff/") or path.startswith("/api/sales/")):
+            self.send_json(404, {"error": "API endpoint not found."})
+            return
+        if not self.check_origin():
+            return
+        user = self.require_role(("admin", "manager"))
+        if not user:
+            return
+        try:
+            item_id = unquote(path.rsplit("/", 1)[-1])
+            if path.startswith("/api/staff/"):
+                self.delete_staff(user, item_id)
+            else:
+                self.delete_sale(user, item_id)
+        except ValueError as error:
+            self.send_json(409, {"error": str(error)})
+        except Exception:
+            traceback.print_exc()
+            self.send_json(500, {"error": "The server could not delete this record."})
 
     def register(self, body):
         name = body.get("name")
@@ -336,14 +459,71 @@ class DashboardHandler(BaseHTTPRequestHandler):
             raise ValueError("Username must be 3–40 characters and use letters, numbers, _ or -.")
         if not isinstance(password, str) or len(password) < 8 or len(password) > 1024:
             raise ValueError("Password must contain 8–1024 characters.")
+        company_name = body.get("companyName")
+        if company_name is not None and not isinstance(company_name, str):
+            raise ValueError("Company name is invalid.")
+        if isinstance(company_name, str) and company_name.strip():
+            company_name = _text(company_name, "Company name", 80)
+        else:
+            company_name = f"{name.strip()}'s company"
+        invite_token = body.get("inviteToken")
+        if isinstance(invite_token, str) and not invite_token.strip():
+            invite_token = None
+        elif invite_token is not None and (not isinstance(invite_token, str) or not 20 <= len(invite_token) <= 128):
+            raise ValueError("Invitation token is invalid.")
         salt = secrets.token_bytes(16)
         password_hash = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, PASSWORD_ITERATIONS)
         with database() as connection:
+            company_id = None
+            role = "admin"
+            invitation = None
+            if invite_token:
+                invitation = connection.execute(
+                    """
+                    SELECT company_id, role FROM invitations
+                    WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?
+                    """,
+                    (self.hash_token(invite_token), int(time.time())),
+                ).fetchone()
+                if not invitation:
+                    raise ValueError("Invitation is invalid, expired, or already used.")
+                company_id = invitation["company_id"]
+                role = invitation["role"]
+            else:
+                cursor = connection.execute(
+                    "INSERT INTO companies (name, state_json) VALUES (?, ?)",
+                    (company_name, json.dumps(initial_state(), separators=(",", ":"))),
+                )
+                company_id = cursor.lastrowid
             cursor = connection.execute(
-                "INSERT INTO users (username, name, salt, password_hash, state_json) VALUES (?, ?, ?, ?, ?)",
-                (username, name.strip(), salt, password_hash, json.dumps(initial_state(), separators=(",", ":"))),
+                """
+                INSERT INTO users (username, name, salt, password_hash, state_json, company_id, role)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (username, name.strip(), salt, password_hash, json.dumps(initial_state(), separators=(",", ":")), company_id, role),
             )
-            user = {"id": cursor.lastrowid, "username": username, "name": name.strip()}
+            user_id = cursor.lastrowid
+            if invitation:
+                updated = connection.execute(
+                    "UPDATE invitations SET used_at = ? WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?",
+                    (int(time.time()), self.hash_token(invite_token), int(time.time())),
+                )
+                if updated.rowcount != 1:
+                    raise ValueError("Invitation has already been used.")
+            user = {
+                "id": user_id,
+                "username": username,
+                "name": name.strip(),
+                "company_id": company_id,
+                "company_name": company_name if not invitation else None,
+                "role": role,
+            }
+            if invitation:
+                company = connection.execute(
+                    "SELECT name FROM companies WHERE id = ?",
+                    (company_id,),
+                ).fetchone()
+                user["company_name"] = company["name"]
         self.create_session(user["id"])
         self.send_json(201, {"user": self.public_user(user)}, self.session_cookie_headers())
 
@@ -354,7 +534,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
             raise ValueError("Enter your username and password.")
         with database() as connection:
             user = connection.execute(
-                "SELECT id, username, name, salt, password_hash FROM users WHERE username = ?",
+                """
+                SELECT users.id, users.username, users.name, users.salt, users.password_hash,
+                       users.company_id, users.role, companies.name AS company_name
+                FROM users JOIN companies ON companies.id = users.company_id
+                WHERE users.username = ?
+                """,
                 (username,),
             ).fetchone()
         if not user:
@@ -395,8 +580,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
         with database() as connection:
             user = connection.execute(
                 """
-                SELECT users.id, users.username, users.name
-                FROM sessions JOIN users ON users.id = sessions.user_id
+                SELECT users.id, users.username, users.name, users.company_id,
+                       users.role, companies.name AS company_name
+                FROM sessions
+                JOIN users ON users.id = sessions.user_id
+                JOIN companies ON companies.id = users.company_id
                 WHERE sessions.token_hash = ? AND sessions.expires_at > ?
                 """,
                 (self.hash_token(token), int(time.time())),
@@ -413,9 +601,226 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.send_json(401, {"error": "Please sign in to continue."})
         return user
 
+    def require_role(self, roles):
+        user = self.require_user()
+        if user and user["role"] not in roles:
+            self.send_json(403, {"error": "Your role does not have permission to perform this action."})
+            return None
+        return user
+
     @staticmethod
     def public_user(user):
-        return {"username": user["username"], "name": user["name"]}
+        return {
+            "username": user["username"],
+            "name": user["name"],
+            "companyName": user["company_name"],
+            "role": user["role"],
+        }
+
+    def load_company_state(self, user):
+        with database() as connection:
+            row = connection.execute(
+                "SELECT state_json FROM companies WHERE id = ?",
+                (user["company_id"],),
+            ).fetchone()
+        try:
+            saved_state = json.loads(row["state_json"])
+            if isinstance(saved_state, str):
+                saved_state = json.loads(saved_state)
+            return validate_state(saved_state)
+        except (TypeError, ValueError, json.JSONDecodeError, KeyError):
+            print(f"Invalid saved dashboard state for company {user['company_id']}.")
+            self.send_json(500, {"error": "Saved dashboard data is invalid and could not be loaded."})
+            return None
+
+    @staticmethod
+    def monthly_report(state, month):
+        if not isinstance(month, str) or not MONTH_PATTERN.fullmatch(month):
+            raise ValueError("Month must use YYYY-MM format.")
+        try:
+            datetime.strptime(month, "%Y-%m")
+        except ValueError as error:
+            raise ValueError("Month is invalid.") from error
+        sales = [
+            sale for sale in state["sales"]
+            if sale["date"].startswith(month) and sale["paymentStatus"] == "Completed"
+        ]
+        staff_reports = []
+        for person in state["staff"]:
+            target = next(
+                (item["amount"] for item in state["targets"]
+                 if item["staffId"] == person["id"] and item["month"] == month),
+                person["defaultTarget"],
+            )
+            amount = sum(sale["amount"] for sale in sales if sale["staffId"] == person["id"])
+            achievement = amount / target * 100 if target else 0
+            reward = max(
+                (rule["reward"] for rule in state["rules"] if achievement >= rule["threshold"]),
+                default=0,
+            )
+            staff_reports.append({
+                "staffId": person["id"],
+                "name": person["name"],
+                "target": target,
+                "sales": amount,
+                "achievementPercent": round(achievement, 2),
+                "incentive": reward,
+            })
+        return {
+            "month": month,
+            "totalSales": sum(sale["amount"] for sale in sales),
+            "saleCount": len(sales),
+            "unitsSold": sum(sale["quantity"] for sale in sales),
+            "staff": staff_reports,
+        }
+
+    def save_company_state(self, user, state):
+        with database() as connection:
+            connection.execute(
+                "UPDATE companies SET state_json = ? WHERE id = ?",
+                (json.dumps(state, separators=(",", ":")), user["company_id"]),
+            )
+
+    def create_invitation(self, user, body):
+        role = body.get("role")
+        if role not in ("manager", "staff"):
+            raise ValueError("Invitations can only be created for manager or staff roles.")
+        if user["role"] == "manager" and role != "staff":
+            self.send_json(403, {"error": "Managers can only invite staff members."})
+            return
+        expires_in_hours = body.get("expiresInHours", 24)
+        if isinstance(expires_in_hours, bool) or not isinstance(expires_in_hours, int) or not 1 <= expires_in_hours <= 168:
+            raise ValueError("Invitation expiry must be between 1 and 168 hours.")
+        token = secrets.token_urlsafe(32)
+        now = int(time.time())
+        with database() as connection:
+            connection.execute(
+                """
+                INSERT INTO invitations (token_hash, company_id, role, created_by, created_at, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    self.hash_token(token),
+                    user["company_id"],
+                    role,
+                    user["id"],
+                    now,
+                    now + expires_in_hours * 60 * 60,
+                ),
+            )
+        self.send_json(201, {
+            "invitation": {
+                "token": token,
+                "role": role,
+                "expiresAt": now + expires_in_hours * 60 * 60,
+            },
+        })
+
+    def create_staff(self, user, body):
+        state = self.load_company_state(user)
+        if state is None:
+            return
+        staff_id = body.get("id")
+        if staff_id is None:
+            staff_id = self.next_id("S", (person["id"] for person in state["staff"]))
+        person = {
+            "id": staff_id,
+            "name": body.get("name"),
+            "department": body.get("department"),
+            "status": body.get("status", "Active"),
+            "defaultTarget": body.get("defaultTarget", 0),
+        }
+        updated = validate_state({**state, "staff": [*state["staff"], person]})
+        saved = updated["staff"][-1]
+        self.save_company_state(user, updated)
+        self.send_json(201, {"staff": saved})
+
+    def update_staff(self, user, staff_id, body):
+        state = self.load_company_state(user)
+        if state is None:
+            return
+        for index, person in enumerate(state["staff"]):
+            if person["id"] == staff_id:
+                updated_person = {**person, **body, "id": staff_id}
+                state["staff"][index] = updated_person
+                updated = validate_state(state)
+                self.save_company_state(user, updated)
+                self.send_json(200, {"staff": updated["staff"][index]})
+                return
+        self.send_json(404, {"error": "Staff member not found."})
+
+    def delete_staff(self, user, staff_id):
+        state = self.load_company_state(user)
+        if state is None:
+            return
+        if not any(person["id"] == staff_id for person in state["staff"]):
+            self.send_json(404, {"error": "Staff member not found."})
+            return
+        related = any(
+            record["staffId"] == staff_id
+            for key in ("targets", "sales", "attendance")
+            for record in state[key]
+        )
+        if related:
+            raise ValueError("Staff with sales, targets, or attendance records cannot be deleted.")
+        state["staff"] = [person for person in state["staff"] if person["id"] != staff_id]
+        self.save_company_state(user, state)
+        self.send_json(200, {"deleted": True})
+
+    def create_sale(self, user, body):
+        state = self.load_company_state(user)
+        if state is None:
+            return
+        sale_id = body.get("id")
+        if sale_id is None:
+            sale_id = self.next_id("SALE", (sale["id"] for sale in state["sales"]))
+        sale = {
+            "id": sale_id,
+            "staffId": body.get("staffId"),
+            "date": body.get("date"),
+            "product": body.get("product"),
+            "quantity": body.get("quantity"),
+            "amount": body.get("amount"),
+            "paymentStatus": body.get("paymentStatus", "Completed"),
+        }
+        updated = validate_state({**state, "sales": [*state["sales"], sale]})
+        saved = updated["sales"][-1]
+        self.save_company_state(user, updated)
+        self.send_json(201, {"sale": saved})
+
+    def update_sale(self, user, sale_id, body):
+        state = self.load_company_state(user)
+        if state is None:
+            return
+        for index, sale in enumerate(state["sales"]):
+            if sale["id"] == sale_id:
+                updated_sale = {**sale, **body, "id": sale_id}
+                state["sales"][index] = updated_sale
+                updated = validate_state(state)
+                self.save_company_state(user, updated)
+                self.send_json(200, {"sale": updated["sales"][index]})
+                return
+        self.send_json(404, {"error": "Sale not found."})
+
+    def delete_sale(self, user, sale_id):
+        state = self.load_company_state(user)
+        if state is None:
+            return
+        if not any(sale["id"] == sale_id for sale in state["sales"]):
+            self.send_json(404, {"error": "Sale not found."})
+            return
+        state["sales"] = [sale for sale in state["sales"] if sale["id"] != sale_id]
+        self.save_company_state(user, state)
+        self.send_json(200, {"deleted": True})
+
+    @staticmethod
+    def next_id(prefix, existing_ids):
+        used = set()
+        for value in existing_ids:
+            match = re.fullmatch(rf"{re.escape(prefix)}(\d+)", value)
+            if match:
+                used.add(int(match.group(1)))
+        return f"{prefix}{max(used, default=0) + 1:03d}"
 
     @staticmethod
     def hash_token(token):
@@ -483,6 +888,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(content)))
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(content)
 

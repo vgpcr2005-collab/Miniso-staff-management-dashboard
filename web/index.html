@@ -52,6 +52,14 @@
               <input id="registerName" type="text" autocomplete="name" minlength="2" maxlength="80" required />
             </label>
             <label>
+              Company name
+              <input id="registerCompanyName" type="text" autocomplete="organization" maxlength="80" />
+            </label>
+            <label>
+              Invitation token (for joining an existing company)
+              <input id="registerInviteToken" type="text" autocomplete="off" />
+            </label>
+            <label>
               Username
               <input id="registerUsername" type="text" autocomplete="username" minlength="3" maxlength="40" required />
             </label>
@@ -239,6 +247,40 @@
                 <p class="panel-hint">Staff IDs connect sales, targets, and performance.</p>
               </div>
             </div>
+            <section class="invite-panel" id="invitePanel" hidden>
+              <div class="panel-header">
+                <div>
+                  <h3>Invite a company member</h3>
+                  <p class="panel-hint">Invitations can only be used once and expire after the selected period.</p>
+                </div>
+              </div>
+              <form id="inviteForm" class="form-grid">
+                <label>
+                  Role
+                  <select id="inviteRole">
+                    <option value="staff">Staff (view only)</option>
+                    <option value="manager">Manager (can edit records)</option>
+                  </select>
+                </label>
+                <label>
+                  Expires in
+                  <select id="inviteExpiry">
+                    <option value="24">24 hours</option>
+                    <option value="72">3 days</option>
+                    <option value="168">7 days</option>
+                  </select>
+                </label>
+                <div class="button-row span-two-columns">
+                  <button type="submit" class="secondary-btn">Generate invitation</button>
+                  <span id="inviteError" class="form-note" role="alert" hidden></span>
+                </div>
+              </form>
+              <div id="inviteResult" class="button-row" hidden>
+                <label class="invite-token-label" for="inviteTokenResult">Share this one-time token</label>
+                <input id="inviteTokenResult" type="text" readonly />
+                <button id="copyInviteBtn" type="button" class="secondary-btn">Copy token</button>
+              </div>
+            </section>
             <form id="staffForm" class="form-grid">
               <label>
                 Staff name

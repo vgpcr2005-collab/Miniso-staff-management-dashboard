@@ -31,6 +31,10 @@ textarea { font: inherit; }
 
 button { cursor: pointer; }
 
+body.read-only #dashboardApp form button[type="submit"],
+body.read-only #dashboardApp #staffTableBody button,
+body.read-only #dashboardApp #attendanceTableBody button { display: none; }
+
 .app-shell {
   display: flex;
   min-height: 100vh;
@@ -167,6 +171,9 @@ select:disabled { cursor: not-allowed; background: #f3f4f6; }
 .button-row { display: flex; align-items: center; gap: 12px; }
 .span-two-columns { grid-column: 1 / -1; }
 .form-note { color: var(--muted); font-size: 0.75rem; }
+.invite-panel { margin-bottom: 20px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: #fffafd; }
+.invite-token-label { color: var(--muted); font-size: 0.8rem; font-weight: 600; }
+.invite-panel #inviteTokenResult { min-width: 0; flex: 1; }
 
 .primary-btn,
 .secondary-btn {

@@ -107,6 +107,7 @@ function migrateState(saved) {
 let state = createInitialState();
 let saveQueue = Promise.resolve();
 let pendingSaveCount = 0;
+let readOnlyMode = false;
 let editingAttendanceKey = null;
 
 const $ = (id) => document.getElementById(id);
@@ -156,6 +157,8 @@ function initialize() {
   window.addEventListener('popstate', activatePageFromHash);
   $('loginForm').addEventListener('submit', handleLogin);
   $('registerForm').addEventListener('submit', handleRegistration);
+  $('inviteForm').addEventListener('submit', handleInvitationSubmit);
+  $('copyInviteBtn').addEventListener('click', copyInvitationToken);
   $('showRegisterBtn').addEventListener('click', showRegistrationForm);
   $('showLoginBtn').addEventListener('click', showLoginForm);
   $('logoutBtn').addEventListener('click', handleLogout);
@@ -269,6 +272,8 @@ async function restoreSession() {
 async function handleRegistration(event) {
   event.preventDefault();
   const name = $('registerName').value.trim();
+  const companyName = $('registerCompanyName').value.trim();
+  const inviteToken = $('registerInviteToken').value.trim();
   const username = $('registerUsername').value.trim().toLowerCase();
   const password = $('registerPassword').value;
   const error = $('registerError');
@@ -296,6 +301,8 @@ async function handleRegistration(event) {
       method: 'POST',
       body: JSON.stringify({
         name,
+        companyName,
+        inviteToken,
         username,
         password
       })
@@ -328,7 +335,13 @@ async function handleLogin(event) {
 function openDashboard(account) {
   $('authScreen').hidden = true;
   $('dashboardApp').hidden = false;
-  $('signedInUser').textContent = account.name;
+  readOnlyMode = account.role === 'staff';
+  document.body.classList.toggle('read-only', readOnlyMode);
+  $('signedInUser').textContent = `${account.name} · ${account.role}`;
+  $('invitePanel').hidden = readOnlyMode;
+  $('inviteRole').querySelector('option[value="manager"]').hidden = account.role !== 'admin';
+  $('resetDataBtn').hidden = readOnlyMode;
+  setDashboardFormsDisabled(false);
   renderDashboard();
 }
 
@@ -341,6 +354,10 @@ async function handleLogout() {
   }
   $('dashboardApp').hidden = true;
   $('authScreen').hidden = false;
+  readOnlyMode = false;
+  document.body.classList.remove('read-only');
+  $('inviteResult').hidden = true;
+  $('inviteTokenResult').value = '';
   $('loginForm').reset();
   showLoginForm();
 }
@@ -349,6 +366,36 @@ function showAuthError(id, message) {
   const element = $(id);
   element.textContent = message;
   element.hidden = false;
+}
+
+async function handleInvitationSubmit(event) {
+  event.preventDefault();
+  const error = $('inviteError');
+  error.hidden = true;
+  $('inviteResult').hidden = true;
+  try {
+    const response = await apiRequest('/api/company/invitations', {
+      method: 'POST',
+      body: JSON.stringify({
+        role: $('inviteRole').value,
+        expiresInHours: Number($('inviteExpiry').value)
+      })
+    });
+    $('inviteTokenResult').value = response.invitation.token;
+    $('inviteResult').hidden = false;
+  } catch (failure) {
+    error.textContent = failure.message || 'Unable to generate an invitation.';
+    error.hidden = false;
+  }
+}
+
+async function copyInvitationToken() {
+  try {
+    await navigator.clipboard.writeText($('inviteTokenResult').value);
+    $('copyInviteBtn').textContent = 'Copied';
+  } catch (failure) {
+    window.alert(`Unable to copy the invitation token: ${failure.message}`);
+  }
 }
 
 async function handleStaffSubmit(event) {
@@ -1091,19 +1138,20 @@ async function persistState(previousState) {
 }
 
 function setDashboardFormsDisabled(disabled) {
+  const formsDisabled = disabled || readOnlyMode;
   [staffForm, targetForm, salesForm, rulesForm, attendanceForm].forEach((form) => {
     Array.from(form.elements).forEach((element) => {
-      element.disabled = disabled;
+      element.disabled = formsDisabled;
     });
   });
   $('staffTableBody').querySelectorAll('button').forEach((button) => {
-    button.disabled = disabled;
+    button.disabled = formsDisabled;
   });
   $('attendanceTableBody').querySelectorAll('button').forEach((button) => {
-    button.disabled = disabled;
+    button.disabled = formsDisabled;
   });
   $('logoutBtn').disabled = disabled;
-  $('resetDataBtn').disabled = disabled;
+  $('resetDataBtn').disabled = formsDisabled;
 }
 
 function setSaveStatus(message, status) {
