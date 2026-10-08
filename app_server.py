@@ -672,7 +672,7 @@ class AppHandler(BaseHTTPRequestHandler):
 
 def main():
     initialize_database()
-    server = ThreadingHTTPServer(("127.0.0.1", PORT), AppHandler)
+    server = ThreadingHTTPServer(("0.0.0.0", PORT), AppHandler)
     print(f"MINISO dashboard: http://localhost:{PORT}")
     print("Demo logins: admin/admin123, manager/manager123, harsha/staff123")
     try:
