@@ -124,6 +124,11 @@ class DashboardServerTests(unittest.TestCase):
         self.assertEqual(response.status, 200)
         self.assertIn("MINISO Staff Performance Dashboard", response.read().decode())
 
+    def test_unknown_api_route_returns_json_error(self):
+        status, payload, headers = self.request("/api/missing")
+        self.assertEqual(status, 404)
+        self.assertEqual(headers.get_content_type(), "application/json")
+        self.assertEqual(payload["error"], "API endpoint not found.")
 
 if __name__ == "__main__":
     unittest.main()

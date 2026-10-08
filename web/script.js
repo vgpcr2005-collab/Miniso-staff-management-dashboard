@@ -163,8 +163,23 @@ async function apiRequest(path, options = {}) {
   const headers = new Headers(options.headers || {});
   if (options.body) headers.set('Content-Type', 'application/json');
   const response = await fetch(path, { ...options, headers, credentials: 'same-origin', cache: 'no-store' });
-  const payload = await response.json();
-  if (!response.ok) throw new Error(payload.error || 'The server could not complete this request.');
+  const responseText = await response.text();
+  let payload = null;
+  try {
+    payload = responseText ? JSON.parse(responseText) : null;
+  } catch {
+    payload = null;
+  }
+  if (!response.ok) {
+    if (payload && typeof payload.error === 'string') throw new Error(payload.error);
+    if (response.status === 404) {
+      throw new Error('The backend API was not found. Start the Python server and open the dashboard at http://localhost:8000.');
+    }
+    throw new Error(`The server returned HTTP ${response.status} without a valid JSON error response.`);
+  }
+  if (!payload || typeof payload !== 'object') {
+    throw new Error(`The server returned an invalid response (HTTP ${response.status}).`);
+  }
   return payload;
 }
 
