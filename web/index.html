@@ -82,19 +82,20 @@
           </div>
         </div>
 
-        <nav class="nav" aria-label="Main navigation">
-          <a class="nav-link active" href="#dashboard">Dashboard</a>
+        <nav class="nav" id="mainNavigation" aria-label="Main navigation">
+          <a class="nav-link active" href="#dashboard" data-page-link="dashboard">Dashboard</a>
           <p class="nav-heading">Staff</p>
-          <a class="nav-link" href="#staff">Staff Directory</a>
+          <a class="nav-link" href="#staff" data-page-link="staff">Staff Directory</a>
+          <a class="nav-link" href="#attendance" data-page-link="attendance">Staff Attendance</a>
           <p class="nav-heading">Performance</p>
-          <a class="nav-link" href="#performance">Staff Performance</a>
-          <a class="nav-link" href="#targets">Target Management</a>
+          <a class="nav-link" href="#performance" data-page-link="performance">Staff Performance</a>
+          <a class="nav-link" href="#targets" data-page-link="targets">Target Management</a>
           <p class="nav-heading">Sales</p>
-          <a class="nav-link" href="#sales">Enter Sale</a>
-          <a class="nav-link" href="#sales-history">Sales History</a>
+          <a class="nav-link" href="#sales" data-page-link="sales">Enter Sale</a>
+          <a class="nav-link" href="#sales-history" data-page-link="sales-history">Sales History</a>
           <p class="nav-heading">Incentives &amp; reports</p>
-          <a class="nav-link" href="#rules">Incentive Rules</a>
-          <a class="nav-link" href="#report">Monthly Report</a>
+          <a class="nav-link" href="#rules" data-page-link="rules">Incentive Rules</a>
+          <a class="nav-link" href="#report" data-page-link="report">Monthly Report</a>
         </nav>
       </aside>
 
@@ -102,7 +103,7 @@
         <header class="topbar" id="dashboard">
           <div>
             <p class="eyebrow">Retail Operations</p>
-            <h2>Staff Performance Dashboard</h2>
+            <h2 id="pageTitle">Staff Performance Dashboard</h2>
             <p id="currentDateTime" class="current-date-time" aria-live="polite"></p>
           </div>
           <div class="topbar-actions">
@@ -117,6 +118,7 @@
           </div>
         </header>
 
+        <div class="page-view" data-page="dashboard">
         <section class="stats-grid" aria-label="Monthly team summary">
           <div class="stat-card accent-blue">
             <span>Total Sales</span>
@@ -142,6 +144,34 @@
             <span>Staff On Target</span>
             <strong id="staffOnTarget">0 / 0</strong>
             <small>Staff at 100% or more</small>
+          </div>
+        </section>
+
+        <section class="stats-grid attendance-stats-grid" aria-label="Today's attendance summary">
+          <div class="stat-card accent-blue">
+            <span>Total Staff</span>
+            <strong id="attendanceTotalStaff">0</strong>
+            <small>Active staff members</small>
+          </div>
+          <div class="stat-card accent-green">
+            <span>Present Today</span>
+            <strong id="attendancePresentToday">0</strong>
+            <small>Marked present</small>
+          </div>
+          <div class="stat-card accent-rose">
+            <span>Absent Today</span>
+            <strong id="attendanceAbsentToday">0</strong>
+            <small>Marked absent</small>
+          </div>
+          <div class="stat-card accent-gold">
+            <span>On Leave</span>
+            <strong id="attendanceLeaveToday">0</strong>
+            <small>Marked on leave</small>
+          </div>
+          <div class="stat-card accent-purple">
+            <span>Average Attendance</span>
+            <strong id="attendanceAverage">0%</strong>
+            <small>Present days, with half days weighted 50%</small>
           </div>
         </section>
 
@@ -174,7 +204,9 @@
           </aside>
         </section>
 
-        <section class="panel" id="performance">
+        </div>
+
+        <section class="panel page-view" id="performance" data-page="performance">
           <div class="panel-header">
             <div>
               <h3>Staff Performance</h3>
@@ -200,8 +232,7 @@
           </div>
         </section>
 
-        <section class="card-grid">
-          <div class="panel" id="staff">
+        <section class="panel page-view" id="staff" data-page="staff">
             <div class="panel-header">
               <div>
                 <h3>Staff Directory</h3>
@@ -236,14 +267,14 @@
             <div class="table-wrap directory-table">
               <table>
                 <thead>
-                  <tr><th>Staff ID</th><th>Name</th><th>Department</th><th>Status</th></tr>
+                  <tr><th>Staff ID</th><th>Name</th><th>Department</th><th>Target</th><th>Status</th><th>Actions</th></tr>
                 </thead>
                 <tbody id="staffTableBody"></tbody>
               </table>
             </div>
-          </div>
+        </section>
 
-          <div class="panel" id="targets">
+        <section class="panel page-view" id="targets" data-page="targets">
             <div class="panel-header">
               <div>
                 <h3>Target Management</h3>
@@ -271,11 +302,68 @@
                 <button type="submit" class="primary-btn">Save Target</button>
               </div>
             </form>
+        </section>
+
+        <section class="panel page-view" id="attendance" data-page="attendance">
+          <div class="panel-header">
+            <div>
+              <h3>Staff Attendance</h3>
+              <p class="panel-hint">Record daily attendance and review a staff member's monthly history.</p>
+            </div>
+          </div>
+          <form id="attendanceForm" class="form-grid">
+            <label>
+              Attendance date
+              <input type="date" id="attendanceDate" required />
+            </label>
+            <label>
+              Month
+              <input type="month" id="attendanceMonth" required />
+            </label>
+            <label>
+              Staff ID
+              <select id="attendanceStaffId" required></select>
+            </label>
+            <label>
+              Staff name
+              <input id="attendanceStaffName" type="text" readonly placeholder="Select a staff member" />
+            </label>
+            <label>
+              Attendance status
+              <select id="attendanceStatus" required>
+                <option value="Present">Present</option>
+                <option value="Absent">Absent</option>
+                <option value="Half Day">Half Day</option>
+                <option value="Leave">Leave</option>
+              </select>
+            </label>
+            <div class="button-row span-two-columns">
+              <button type="submit" id="attendanceSubmitBtn" class="primary-btn">Save Attendance</button>
+              <button type="button" id="attendanceCancelEditBtn" class="secondary-btn" hidden>Cancel edit</button>
+            </div>
+          </form>
+          <div class="attendance-history-controls">
+            <label>
+              Attendance history month
+              <input type="month" id="attendanceHistoryMonth" />
+            </label>
+            <label>
+              Staff member
+              <select id="attendanceHistoryStaffId"></select>
+            </label>
+          </div>
+          <div id="attendanceSummary" class="attendance-summary" aria-live="polite"></div>
+          <div class="table-wrap directory-table">
+            <table>
+              <thead>
+                <tr><th>Date</th><th>Staff ID</th><th>Staff Name</th><th>Status</th><th>Action</th></tr>
+              </thead>
+              <tbody id="attendanceTableBody"></tbody>
+            </table>
           </div>
         </section>
 
-        <section class="card-grid">
-          <div class="panel" id="sales">
+        <section class="panel page-view" id="sales" data-page="sales">
             <div class="panel-header">
               <div>
                 <h3>Enter Sale</h3>
@@ -323,9 +411,9 @@
                 <button type="submit" class="primary-btn">Save Sale</button>
               </div>
             </form>
-          </div>
+        </section>
 
-          <div class="panel" id="rules">
+        <section class="panel page-view" id="rules" data-page="rules">
             <div class="panel-header">
               <div>
                 <h3>Incentive Rules</h3>
@@ -345,10 +433,9 @@
                 <button type="submit" class="primary-btn">Save Rules</button>
               </div>
             </form>
-          </div>
         </section>
 
-        <section class="panel" id="sales-history">
+        <section class="panel page-view" id="sales-history" data-page="sales-history">
           <div class="panel-header">
             <div>
               <h3>Sales History</h3>
@@ -366,12 +453,13 @@
           </div>
         </section>
 
-        <section class="panel" id="report">
+        <section class="panel page-view" id="report" data-page="report">
           <div class="panel-header">
             <div>
               <h3>Monthly Report</h3>
-              <p class="panel-hint">This report uses the selected reporting month above.</p>
+              <p class="panel-hint">Includes monthly sales performance and attendance for the selected reporting month.</p>
             </div>
+            <button type="button" id="downloadReportBtn" class="primary-btn">Download Report</button>
           </div>
           <textarea id="reportOutput" readonly aria-label="Monthly performance report"></textarea>
         </section>

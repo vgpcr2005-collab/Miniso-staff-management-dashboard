@@ -35,6 +35,7 @@ function createInitialState() {
       { id: 'SALE005', staffId: 'S002', date: monthStart, product: 'Beauty Kit', quantity: 2, amount: 120000, paymentStatus: 'Completed' },
       { id: 'SALE006', staffId: 'S003', date: monthStart, product: 'Storage Box', quantity: 1, amount: 40000, paymentStatus: 'Completed' }
     ],
+    attendance: [],
     rules: [
       { threshold: 80, reward: 1000 },
       { threshold: 100, reward: 2000 },
@@ -84,6 +85,12 @@ function migrateState(saved) {
     ? saved.rules
     : initialRules;
 
+  const attendance = Array.isArray(saved.attendance) ? saved.attendance.map((record) => ({
+    staffId: String(record.staffId || ''),
+    date: String(record.date || ''),
+    status: ['Present', 'Absent', 'Half Day', 'Leave'].includes(record.status) ? record.status : 'Present'
+  })) : [];
+
   return {
     staff,
     targets: targets.map((target) => ({
@@ -92,6 +99,7 @@ function migrateState(saved) {
       amount: Number(target.amount) || 0
     })),
     sales,
+    attendance,
     rules: rules.map((rule) => ({ threshold: Number(rule.threshold), reward: Number(rule.reward) }))
   };
 }
@@ -99,12 +107,14 @@ function migrateState(saved) {
 let state = createInitialState();
 let saveQueue = Promise.resolve();
 let pendingSaveCount = 0;
+let editingAttendanceKey = null;
 
 const $ = (id) => document.getElementById(id);
 const staffForm = $('staffForm');
 const targetForm = $('targetForm');
 const salesForm = $('salesForm');
 const rulesForm = $('rulesForm');
+const attendanceForm = $('attendanceForm');
 const reportMonthInput = $('reportMonth');
 
 initialize();
@@ -113,6 +123,9 @@ function initialize() {
   reportMonthInput.value = currentMonth();
   $('targetMonth').value = currentMonth();
   $('saleDate').value = localDateString();
+  $('attendanceDate').value = localDateString();
+  $('attendanceMonth').value = currentMonth();
+  $('attendanceHistoryMonth').value = currentMonth();
   updateCurrentDateTime();
   window.setInterval(updateCurrentDateTime, 1000);
 
@@ -120,13 +133,27 @@ function initialize() {
   targetForm.addEventListener('submit', handleTargetSubmit);
   salesForm.addEventListener('submit', handleSalesSubmit);
   rulesForm.addEventListener('submit', handleRulesSubmit);
+  attendanceForm.addEventListener('submit', handleAttendanceSubmit);
   $('salesStaffId').addEventListener('change', updateSalesStaffName);
   $('targetStaffId').addEventListener('change', updateTargetStaffName);
   $('targetMonth').addEventListener('change', updateTargetStaffName);
-  reportMonthInput.addEventListener('change', renderDashboard);
+  $('attendanceStaffId').addEventListener('change', updateAttendanceStaffName);
+  $('attendanceDate').addEventListener('change', syncAttendanceMonthFromDate);
+  $('attendanceMonth').addEventListener('change', syncAttendanceDateFromMonth);
+  $('attendanceHistoryMonth').addEventListener('change', renderAttendance);
+  $('attendanceHistoryStaffId').addEventListener('change', renderAttendance);
+  $('attendanceCancelEditBtn').addEventListener('click', cancelAttendanceEdit);
+  reportMonthInput.addEventListener('change', () => {
+    renderDashboard();
+  });
   $('trendView').addEventListener('change', renderSalesChart);
   $('resetDataBtn').addEventListener('click', resetData);
   $('exportBtn').addEventListener('click', exportMonthlyCsv);
+  $('downloadReportBtn').addEventListener('click', downloadMonthlyReport);
+  $('staffTableBody').addEventListener('click', handleStaffTableAction);
+  $('attendanceTableBody').addEventListener('click', handleAttendanceTableAction);
+  $('mainNavigation').addEventListener('click', handleNavigationClick);
+  window.addEventListener('popstate', activatePageFromHash);
   $('loginForm').addEventListener('submit', handleLogin);
   $('registerForm').addEventListener('submit', handleRegistration);
   $('showRegisterBtn').addEventListener('click', showRegistrationForm);
@@ -140,7 +167,44 @@ function initialize() {
   });
 
   populateRuleFields();
+  activatePageFromHash();
   restoreSession();
+}
+
+function handleNavigationClick(event) {
+  const link = event.target.closest('a[data-page-link]');
+  if (!link) return;
+  event.preventDefault();
+  const hash = link.getAttribute('href');
+  if (window.location.hash !== hash) window.history.pushState(null, '', hash);
+  activatePage(link.dataset.pageLink);
+}
+
+function activatePageFromHash() {
+  const hash = window.location.hash.slice(1);
+  const link = Array.from(document.querySelectorAll('[data-page-link]'))
+    .find((item) => item.getAttribute('href') === `#${hash}`);
+  activatePage(link ? link.dataset.pageLink : 'dashboard');
+}
+
+function activatePage(page) {
+  const views = Array.from(document.querySelectorAll('.page-view'));
+  const selected = views.find((view) => view.dataset.page === page);
+  const activePage = selected ? page : 'dashboard';
+  views.forEach((view) => {
+    view.hidden = view.dataset.page !== activePage;
+  });
+  document.querySelectorAll('[data-page-link]').forEach((link) => {
+    const active = link.dataset.pageLink === activePage;
+    link.classList.toggle('active', active);
+    if (active) link.setAttribute('aria-current', 'page');
+    else link.removeAttribute('aria-current');
+  });
+  const activeLink = document.querySelector(`[data-page-link="${activePage}"]`);
+  $('pageTitle').textContent = activePage === 'dashboard'
+    ? 'Staff Performance Dashboard'
+    : activeLink.textContent.trim();
+  window.scrollTo(0, 0);
 }
 
 function showRegistrationForm() {
@@ -311,6 +375,177 @@ async function handleStaffSubmit(event) {
   renderDashboard();
 }
 
+async function handleStaffTableAction(event) {
+  const button = event.target.closest('button[data-action="delete-staff"]');
+  if (!button) return;
+  const staffId = button.dataset.staffId;
+  const person = state.staff.find((item) => item.id === staffId);
+  if (!person || !window.confirm('Are you sure you want to delete this staff member?')) return;
+
+  const previousState = clone(state);
+  state.staff = state.staff.filter((item) => item.id !== staffId);
+  state.targets = state.targets.filter((item) => item.staffId !== staffId);
+  state.sales = state.sales.filter((item) => item.staffId !== staffId);
+  state.attendance = state.attendance.filter((item) => item.staffId !== staffId);
+  if (!await persistState(previousState)) return;
+  if (editingAttendanceKey && editingAttendanceKey.staffId === staffId) cancelAttendanceEdit();
+  renderStaffOptions();
+  renderDashboard();
+}
+
+async function handleAttendanceSubmit(event) {
+  event.preventDefault();
+  const staffId = $('attendanceStaffId').value;
+  const date = $('attendanceDate').value;
+  const status = $('attendanceStatus').value;
+  if (!state.staff.some((person) => person.id === staffId)) {
+    window.alert('Select a staff member before saving attendance.');
+    return;
+  }
+  if (!date || !['Present', 'Absent', 'Half Day', 'Leave'].includes(status)) {
+    window.alert('Choose a valid attendance date and status.');
+    return;
+  }
+
+  const previousState = clone(state);
+  const existingIndex = editingAttendanceKey
+    ? state.attendance.findIndex((item) => item.staffId === editingAttendanceKey.staffId
+      && item.date === editingAttendanceKey.date)
+    : -1;
+  const duplicate = state.attendance.some((item, index) => index !== existingIndex
+    && item.staffId === staffId && item.date === date);
+  if (duplicate) {
+    window.alert('Attendance for this staff member and date already exists. Edit the existing record instead.');
+    return;
+  }
+
+  const record = { staffId, date, status };
+  if (existingIndex >= 0) state.attendance[existingIndex] = record;
+  else state.attendance.push(record);
+  if (!await persistState(previousState)) return;
+  cancelAttendanceEdit();
+  $('attendanceMonth').value = date.slice(0, 7);
+  $('attendanceHistoryMonth').value = date.slice(0, 7);
+  $('attendanceHistoryStaffId').value = staffId;
+  renderDashboard();
+}
+
+function handleAttendanceTableAction(event) {
+  const button = event.target.closest('button[data-action="edit-attendance"]');
+  if (!button) return;
+  const record = state.attendance.find((item) => item.staffId === button.dataset.staffId
+    && item.date === button.dataset.date);
+  if (!record) return;
+  editingAttendanceKey = { staffId: record.staffId, date: record.date };
+  $('attendanceStaffId').value = record.staffId;
+  $('attendanceDate').value = record.date;
+  $('attendanceMonth').value = record.date.slice(0, 7);
+  $('attendanceStatus').value = record.status;
+  updateAttendanceStaffName();
+  $('attendanceSubmitBtn').textContent = 'Update Attendance';
+  $('attendanceCancelEditBtn').hidden = false;
+  attendanceForm.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function cancelAttendanceEdit() {
+  editingAttendanceKey = null;
+  $('attendanceStatus').value = 'Present';
+  $('attendanceSubmitBtn').textContent = 'Save Attendance';
+  $('attendanceCancelEditBtn').hidden = true;
+}
+
+function updateAttendanceStaffName() {
+  const person = state.staff.find((item) => item.id === $('attendanceStaffId').value);
+  $('attendanceStaffName').value = person ? person.name : '';
+}
+
+function syncAttendanceMonthFromDate() {
+  if ($('attendanceDate').value) $('attendanceMonth').value = $('attendanceDate').value.slice(0, 7);
+}
+
+function syncAttendanceDateFromMonth() {
+  const date = $('attendanceDate').value;
+  const month = $('attendanceMonth').value;
+  if (month && (!date || date.slice(0, 7) !== month)) $('attendanceDate').value = `${month}-01`;
+}
+
+function getAttendanceCounts(staffId, month) {
+  const counts = { present: 0, absent: 0, halfDay: 0, leave: 0 };
+  state.attendance
+    .filter((record) => record.staffId === staffId && record.date.slice(0, 7) === month)
+    .forEach((record) => {
+      if (record.status === 'Present') counts.present += 1;
+      else if (record.status === 'Absent') counts.absent += 1;
+      else if (record.status === 'Half Day') counts.halfDay += 1;
+      else if (record.status === 'Leave') counts.leave += 1;
+    });
+  return counts;
+}
+
+function renderAttendanceDashboardStats() {
+  const today = localDateString();
+  const records = state.attendance.filter((record) => record.date === today);
+  const countStatus = (status) => records.filter((record) => record.status === status).length;
+  const creditedAttendance = records.reduce((total, record) => total
+    + (record.status === 'Present' ? 1 : record.status === 'Half Day' ? 0.5 : 0), 0);
+  $('attendanceTotalStaff').textContent = String(state.staff.length);
+  $('attendancePresentToday').textContent = String(countStatus('Present'));
+  $('attendanceAbsentToday').textContent = String(countStatus('Absent'));
+  $('attendanceLeaveToday').textContent = String(countStatus('Leave'));
+  $('attendanceAverage').textContent = `${state.staff.length ? (creditedAttendance / state.staff.length * 100).toFixed(1) : '0.0'}%`;
+}
+
+function renderAttendance() {
+  const body = $('attendanceTableBody');
+  body.replaceChildren();
+  const month = $('attendanceHistoryMonth').value || currentMonth();
+  const staffId = $('attendanceHistoryStaffId').value;
+  const counts = getAttendanceCounts(staffId, month);
+  const summary = $('attendanceSummary');
+  summary.replaceChildren();
+  [
+    ['Present', counts.present],
+    ['Absent', counts.absent],
+    ['Half Days', counts.halfDay],
+    ['Leaves', counts.leave]
+  ].forEach(([label, value]) => {
+    const item = document.createElement('div');
+    item.className = 'attendance-summary-item';
+    const title = document.createElement('span');
+    title.textContent = label;
+    const total = document.createElement('strong');
+    total.textContent = String(value);
+    item.append(title, total);
+    summary.append(item);
+  });
+
+  const records = state.attendance
+    .filter((record) => record.staffId === staffId && record.date.slice(0, 7) === month)
+    .sort((a, b) => b.date.localeCompare(a.date));
+  if (!staffId || !records.length) {
+    appendMessageRow(body, 5, staffId ? 'No attendance records for this staff member and month.' : 'Add staff to record attendance.');
+    return;
+  }
+  records.forEach((record) => {
+    const person = state.staff.find((item) => item.id === record.staffId);
+    const row = document.createElement('tr');
+    appendCell(row, formatDate(record.date));
+    appendCell(row, record.staffId);
+    appendCell(row, person ? person.name : 'Unknown staff');
+    appendCell(row, record.status);
+    const actionCell = appendCell(row, '');
+    const editButton = document.createElement('button');
+    editButton.type = 'button';
+    editButton.className = 'text-button';
+    editButton.dataset.action = 'edit-attendance';
+    editButton.dataset.staffId = record.staffId;
+    editButton.dataset.date = record.date;
+    editButton.textContent = 'Edit';
+    actionCell.append(editButton);
+    body.append(row);
+  });
+}
+
 async function handleTargetSubmit(event) {
   event.preventDefault();
   const staffId = $('targetStaffId').value;
@@ -400,6 +635,8 @@ function renderDashboard() {
   renderAttentionList();
   renderSalesChart();
   renderReport();
+  renderAttendanceDashboardStats();
+  renderAttendance();
 }
 
 function getSelectedMonth() {
@@ -434,9 +671,9 @@ function calculateIncentive(achievement) {
   return eligible.length ? eligible[eligible.length - 1].reward : 0;
 }
 
-function getPerformance(staff) {
-  const target = getTarget(staff.id);
-  const sales = getSalesTotal(staff.id);
+function getPerformance(staff, month = getSelectedMonth()) {
+  const target = getTarget(staff.id, month);
+  const sales = getSalesTotal(staff.id, month);
   const achievement = getAchievement(sales, target);
   return { target, sales, achievement, gap: target - sales, incentive: calculateIncentive(achievement) };
 }
@@ -489,7 +726,7 @@ function renderStaffTable() {
   const body = $('staffTableBody');
   body.replaceChildren();
   if (!state.staff.length) {
-    appendMessageRow(body, 4, 'No staff members have been added.');
+    appendMessageRow(body, 6, 'No staff members have been added.');
     return;
   }
   state.staff.forEach((person) => {
@@ -497,7 +734,17 @@ function renderStaffTable() {
     appendCell(row, person.id);
     appendCell(row, person.name);
     appendCell(row, person.department);
+    appendCell(row, formatCurrency(getTarget(person.id)));
     appendCell(row, person.status);
+    const actions = appendCell(row, '');
+    const deleteButton = document.createElement('button');
+    deleteButton.type = 'button';
+    deleteButton.className = 'text-button danger-button';
+    deleteButton.dataset.action = 'delete-staff';
+    deleteButton.dataset.staffId = person.id;
+    deleteButton.textContent = 'Delete';
+    deleteButton.setAttribute('aria-label', `Delete ${person.name}`);
+    actions.append(deleteButton);
     body.append(row);
   });
 }
@@ -660,22 +907,24 @@ function monthlyBuckets(month) {
 
 function renderReport() {
   const month = getSelectedMonth();
-  const active = getActiveStaff();
-  const target = active.reduce((total, person) => total + getTarget(person.id, month), 0);
-  const sales = active.reduce((total, person) => total + getSalesTotal(person.id, month), 0);
+  const staff = state.staff;
+  const target = staff.reduce((total, person) => total + getTarget(person.id, month), 0);
+  const sales = staff.reduce((total, person) => total + getSalesTotal(person.id, month), 0);
   const lines = [
     `MINISO STAFF PERFORMANCE REPORT — ${month}`,
     '================================================',
     `Team sales: ${formatCurrency(sales)}`,
     `Monthly target: ${formatCurrency(target)}`,
     `Achievement: ${getAchievement(sales, target).toFixed(1)}%`,
-    `Incentives: ${formatCurrency(active.reduce((total, person) => total + getPerformance(person).incentive, 0))}`,
+    `Incentives: ${formatCurrency(staff.reduce((total, person) => total + getPerformance(person, month).incentive, 0))}`,
     '',
-    'STAFF PERFORMANCE'
+    'STAFF PERFORMANCE & ATTENDANCE',
+    'Staff ID | Staff Name | Monthly Target | Total Sales | Achievement % | Incentive | Present | Absent | Half Days | Leaves | Overall Performance'
   ];
-  active.forEach((person) => {
-    const result = getPerformance(person);
-    lines.push(`${person.id} | ${person.name} | Target ${formatCurrency(result.target)} | Sales ${formatCurrency(result.sales)} | ${result.achievement.toFixed(1)}% | Incentive ${formatCurrency(result.incentive)}`);
+  staff.forEach((person) => {
+    const result = getPerformance(person, month);
+    const attendance = getAttendanceCounts(person.id, month);
+    lines.push(`${person.id} | ${person.name} | ${formatCurrency(result.target)} | ${formatCurrency(result.sales)} | ${result.achievement.toFixed(1)}% | ${formatCurrency(result.incentive)} | ${attendance.present} | ${attendance.absent} | ${attendance.halfDay} | ${attendance.leave} | ${getStatusLabel(result.achievement)}`);
   });
   $('reportOutput').value = lines.join('\n');
 }
@@ -684,8 +933,11 @@ function renderStaffOptions() {
   const activeStaff = getActiveStaff();
   populateStaffSelect($('salesStaffId'), activeStaff, 'No active staff — add staff first');
   populateStaffSelect($('targetStaffId'), state.staff, 'Add staff first');
+  populateStaffSelect($('attendanceStaffId'), state.staff, 'Add staff first');
+  populateStaffSelect($('attendanceHistoryStaffId'), state.staff, 'Add staff first');
   updateSalesStaffName();
   updateTargetStaffName();
+  updateAttendanceStaffName();
   $('saleIdPreview').value = generateSaleId();
 }
 
@@ -837,10 +1089,16 @@ async function persistState(previousState) {
 }
 
 function setDashboardFormsDisabled(disabled) {
-  [staffForm, targetForm, salesForm, rulesForm].forEach((form) => {
+  [staffForm, targetForm, salesForm, rulesForm, attendanceForm].forEach((form) => {
     Array.from(form.elements).forEach((element) => {
       element.disabled = disabled;
     });
+  });
+  $('staffTableBody').querySelectorAll('button').forEach((button) => {
+    button.disabled = disabled;
+  });
+  $('attendanceTableBody').querySelectorAll('button').forEach((button) => {
+    button.disabled = disabled;
   });
   $('logoutBtn').disabled = disabled;
   $('resetDataBtn').disabled = disabled;
@@ -871,8 +1129,51 @@ function exportMonthlyCsv() {
   URL.revokeObjectURL(url);
 }
 
+function downloadMonthlyReport() {
+  const month = getSelectedMonth();
+  const headings = [
+    'Staff ID',
+    'Staff Name',
+    'Monthly Target',
+    'Total Sales',
+    'Target Achievement %',
+    'Incentive Earned',
+    'Total Present Days',
+    'Total Absent Days',
+    'Half Days',
+    'Leave Days',
+    'Overall Performance'
+  ];
+  const rows = state.staff.map((person) => {
+    const performance = getPerformance(person, month);
+    const attendance = getAttendanceCounts(person.id, month);
+    return [
+      person.id,
+      person.name,
+      performance.target,
+      performance.sales,
+      performance.achievement.toFixed(1),
+      performance.incentive,
+      attendance.present,
+      attendance.absent,
+      attendance.halfDay,
+      attendance.leave,
+      getStatusLabel(performance.achievement)
+    ];
+  });
+  const csv = [headings, ...rows].map((row) => row.map(escapeCsv).join(',')).join('\r\n');
+  const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `miniso-monthly-report-${month}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 function escapeCsv(value) {
-  const text = String(value);
+  let text = String(value);
+  if (/^[\t\r\n ]*[=+\-@]/.test(text)) text = `'${text}`;
   return `"${text.replaceAll('"', '""')}"`;
 }
 

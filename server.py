@@ -91,6 +91,7 @@ def initial_state():
             {"id": "SALE005", "staffId": "S002", "date": month_start, "product": "Beauty Kit", "quantity": 2, "amount": 120000, "paymentStatus": "Completed"},
             {"id": "SALE006", "staffId": "S003", "date": month_start, "product": "Storage Box", "quantity": 1, "amount": 40000, "paymentStatus": "Completed"},
         ],
+        "attendance": [],
         "rules": [
             {"threshold": 80, "reward": 1000},
             {"threshold": 100, "reward": 2000},
@@ -106,10 +107,11 @@ def validate_state(value):
     staff = value.get("staff")
     targets = value.get("targets")
     sales = value.get("sales")
+    attendance = value.get("attendance", [])
     rules = value.get("rules")
-    if not all(isinstance(items, list) for items in (staff, targets, sales, rules)):
-        raise ValueError("Dashboard data is missing staff, targets, sales, or rules.")
-    if len(staff) > 5000 or len(targets) > 50000 or len(sales) > 100000 or len(rules) != 4:
+    if not all(isinstance(items, list) for items in (staff, targets, sales, attendance, rules)):
+        raise ValueError("Dashboard data is missing staff, targets, sales, attendance, or rules.")
+    if len(staff) > 5000 or len(targets) > 50000 or len(sales) > 100000 or len(attendance) > 100000 or len(rules) != 4:
         raise ValueError("Dashboard data exceeds supported limits or has invalid rules.")
 
     clean_staff = []
@@ -194,6 +196,29 @@ def validate_state(value):
             "paymentStatus": status,
         })
 
+    clean_attendance = []
+    attendance_keys = set()
+    for record in attendance:
+        if not isinstance(record, dict):
+            raise ValueError("Each attendance record must be an object.")
+        staff_id = _text(record.get("staffId"), "Attendance staff ID", 40)
+        date = record.get("date")
+        status = record.get("status")
+        if (
+            staff_id not in staff_ids
+            or not isinstance(date, str)
+            or not DATE_PATTERN.fullmatch(date)
+            or status not in ("Present", "Absent", "Half Day", "Leave")
+            or (staff_id, date) in attendance_keys
+        ):
+            raise ValueError("Attendance staff, date, status, or duplicate record is invalid.")
+        try:
+            datetime.strptime(date, "%Y-%m-%d")
+        except ValueError as error:
+            raise ValueError("Attendance date is invalid.") from error
+        attendance_keys.add((staff_id, date))
+        clean_attendance.append({"staffId": staff_id, "date": date, "status": status})
+
     clean_rules = []
     for rule in rules:
         if not isinstance(rule, dict):
@@ -204,7 +229,13 @@ def validate_state(value):
         })
     if any(clean_rules[index]["threshold"] <= clean_rules[index - 1]["threshold"] for index in range(1, 4)):
         raise ValueError("Incentive thresholds must be strictly increasing.")
-    return {"staff": clean_staff, "targets": clean_targets, "sales": clean_sales, "rules": clean_rules}
+    return {
+        "staff": clean_staff,
+        "targets": clean_targets,
+        "sales": clean_sales,
+        "attendance": clean_attendance,
+        "rules": clean_rules,
+    }
 
 
 def _text(value, label, maximum):

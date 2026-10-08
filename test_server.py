@@ -130,5 +130,30 @@ class DashboardServerTests(unittest.TestCase):
         self.assertEqual(headers.get_content_type(), "application/json")
         self.assertEqual(payload["error"], "API endpoint not found.")
 
+    def test_attendance_is_validated_persisted_and_legacy_state_is_accepted(self):
+        self.register(self.client, "attendance_user")
+        status, state, _ = self.request("/api/state")
+        self.assertEqual(status, 200)
+
+        state.pop("attendance")
+        status, _, _ = self.request("/api/state", "PUT", state)
+        self.assertEqual(status, 200)
+
+        status, state, _ = self.request("/api/state")
+        self.assertEqual(status, 200)
+        state["attendance"] = [
+            {"staffId": "S001", "date": "2026-10-08", "status": "Present"},
+            {"staffId": "S001", "date": "2026-10-09", "status": "Half Day"},
+        ]
+        self.assertEqual(self.request("/api/state", "PUT", state)[0], 200)
+        _, saved_state, _ = self.request("/api/state")
+        self.assertEqual(saved_state["attendance"], state["attendance"])
+
+        state["attendance"].append({"staffId": "S001", "date": "2026-10-08", "status": "Leave"})
+        status, payload, _ = self.request("/api/state", "PUT", state)
+        self.assertEqual(status, 400)
+        self.assertIn("Attendance", payload["error"])
+
+
 if __name__ == "__main__":
     unittest.main()
