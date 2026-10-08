@@ -1,3 +1,0 @@
-S101,Harsha,Sales,Sales Executive,STORE01,Active,100000.0
-S102,Rahul,Sales,Senior Sales,STORE01,Active,90000.0
-S103,Priya,Sales,Sales Executive,STORE01,Active,110000.0

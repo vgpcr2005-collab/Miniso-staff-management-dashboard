@@ -1,7 +1,7 @@
 @echo off
 cd /d "%~dp0"
-python app_server.py
+python -m http.server 8000 --directory web
 if errorlevel 1 (
-	echo Could not start the MINISO server. Make sure Python 3 is installed.
+	echo Could not start the static dashboard. Make sure Python 3 is installed.
 	pause
 )

@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: miniso-staff-performance-dashboard
+    runtime: static
+    buildCommand: ""
+    staticPublishPath: web
